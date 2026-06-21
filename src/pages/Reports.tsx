@@ -13,6 +13,11 @@ import {
   Form,
   DatePicker,
   message,
+  Checkbox,
+  Table,
+  Empty,
+  Divider,
+  Alert,
 } from 'antd';
 import {
   SearchOutlined,
@@ -22,6 +27,9 @@ import {
   FileTextOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
+  BarChartOutlined,
+  DiffOutlined,
+  MinusOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -29,7 +37,7 @@ import weekOfYear from 'dayjs/plugin/weekOfYear';
 import { useReportStore } from '@/store/report';
 import { useAuthStore } from '@/store/auth';
 import { regionHierarchy, regionNameMap } from '@/mock/data';
-import type { WeeklyReport } from '@/types';
+import type { WeeklyReport, ReportDiffSummary } from '@/types';
 import { cn } from '@/lib/utils';
 
 dayjs.extend(weekOfYear);
@@ -67,25 +75,31 @@ const getWeekRange = (year: number, weekNumber: number) => {
 
 export default function Reports() {
   const navigate = useNavigate();
-  const { reports, fetchReports, loading, generating, generateReport } = useReportStore();
-  const { user, filterReports, getAccessibleRegions } = useAuthStore();
+  const { reports, fetchReports, loading, generating, generateReport, compareReports } = useReportStore();
+  const { user, filterReports, getReportAccessibleRegions } = useAuthStore();
   const [yearFilter, setYearFilter] = useState<number | undefined>(undefined);
   const [regionFilter, setRegionFilter] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState<string>('');
   const [generateModalVisible, setGenerateModalVisible] = useState(false);
   const [generateForm] = Form.useForm();
+  const [compareModalVisible, setCompareModalVisible] = useState(false);
+  const [compareRegion, setCompareRegion] = useState<string>('');
+  const [compareReportA, setCompareReportA] = useState<string>('');
+  const [compareReportB, setCompareReportB] = useState<string>('');
+  const [compareResult, setCompareResult] = useState<ReportDiffSummary | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
 
   useEffect(() => {
     fetchReports();
   }, [fetchReports]);
 
   const accessibleRegions = useMemo(() => {
-    const regions = getAccessibleRegions();
+    const regions = getReportAccessibleRegions();
     return regions
       .filter((code) => regionHierarchy[code])
       .map((code) => ({ code, name: regionNameMap[code] || code }))
       .filter((r) => r.code !== '000000' || user?.role === 'national');
-  }, [getAccessibleRegions, user]);
+  }, [getReportAccessibleRegions, user]);
 
   const filteredReports = useMemo(() => {
     const data = filterReports(reports);
@@ -136,6 +150,44 @@ export default function Reports() {
     }
     return weeks;
   }, [yearFilter]);
+
+  const compareRegionOptions = useMemo(() => {
+    return accessibleRegions;
+  }, [accessibleRegions]);
+
+  const compareReportOptions = useMemo(() => {
+    if (!compareRegion) return [];
+    return filteredReports
+      .filter(r => r.regionCode === compareRegion && r.status !== 'generating')
+      .sort((a, b) => (b.year - a.year) || (b.weekNumber - a.weekNumber))
+      .map(r => ({
+        value: r.id,
+        label: `${r.year}年第${r.weekNumber}周 (${r.weekStart} ~ ${r.weekEnd})`,
+      }));
+  }, [compareRegion, filteredReports]);
+
+  const handleCompare = async () => {
+    if (!compareReportA || !compareReportB) {
+      message.warning('请选择两期报告进行对比');
+      return;
+    }
+    if (compareReportA === compareReportB) {
+      message.warning('请选择不同的两期报告');
+      return;
+    }
+    setCompareLoading(true);
+    await new Promise(r => setTimeout(r, 400));
+    const result = compareReports(compareReportA, compareReportB);
+    setCompareResult(result);
+    setCompareLoading(false);
+  };
+
+  const resetCompare = () => {
+    setCompareRegion('');
+    setCompareReportA('');
+    setCompareReportB('');
+    setCompareResult(null);
+  };
 
   const handleGenerate = async () => {
     try {
@@ -285,14 +337,22 @@ export default function Reports() {
               查看各地区各周期的培训效能诊断报告，或按地区和周次自动生成新报告
             </p>
           </div>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setGenerateModalVisible(true)}
-            loading={generating}
-          >
-            自动生成报告
-          </Button>
+          <Space>
+            <Button
+              icon={<DiffOutlined />}
+              onClick={() => { resetCompare(); setCompareModalVisible(true); }}
+            >
+              对比分析
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setGenerateModalVisible(true)}
+              loading={generating}
+            >
+              自动生成报告
+            </Button>
+          </Space>
         </div>
 
         <Card
@@ -440,6 +500,200 @@ export default function Reports() {
               </Space>
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title="报告对比分析"
+          open={compareModalVisible}
+          onCancel={() => { setCompareModalVisible(false); resetCompare(); }}
+          footer={null}
+          width={compareResult ? 900 : 600}
+          destroyOnClose
+        >
+          {!compareResult ? (
+            <div>
+              <Alert
+                message="选择同一地区的两期报告进行对比，系统将自动生成差异摘要"
+                type="info"
+                showIcon
+                className="mb-5"
+              />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">选择地区</label>
+                  <Select
+                    placeholder="请选择地区"
+                    style={{ width: '100%' }}
+                    value={compareRegion || undefined}
+                    onChange={(v) => { setCompareRegion(v); setCompareReportA(''); setCompareReportB(''); }}
+                  >
+                    {compareRegionOptions.map((r) => (
+                      <Option key={r.code} value={r.code}>
+                        {r.name}
+                      </Option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">报告 A（基准期）</label>
+                  <Select
+                    placeholder="请选择第一期报告"
+                    style={{ width: '100%' }}
+                    disabled={!compareRegion}
+                    value={compareReportA || undefined}
+                    onChange={setCompareReportA}
+                    showSearch
+                    optionFilterProp="label"
+                  >
+                    {compareReportOptions.map((r) => (
+                      <Option key={r.value} value={r.value}>
+                        {r.label}
+                      </Option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">报告 B（对比期）</label>
+                  <Select
+                    placeholder="请选择第二期报告"
+                    style={{ width: '100%' }}
+                    disabled={!compareRegion}
+                    value={compareReportB || undefined}
+                    onChange={setCompareReportB}
+                    showSearch
+                    optionFilterProp="label"
+                  >
+                    {compareReportOptions.map((r) => (
+                      <Option key={r.value} value={r.value}>
+                        {r.label}
+                      </Option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button onClick={() => resetCompare()}>
+                  重置
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<BarChartOutlined />}
+                  onClick={handleCompare}
+                  loading={compareLoading}
+                  disabled={!compareReportA || !compareReportB}
+                >
+                  生成差异摘要
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <Tag color="geekblue" style={{ marginRight: 8 }}>{compareResult.regionName}</Tag>
+                  <span className="text-sm text-gray-500">
+                    {compareResult.reportA.year}年第{compareResult.reportA.weekNumber}周
+                    <span className="mx-2">VS</span>
+                    {compareResult.reportB.year}年第{compareResult.reportB.weekNumber}周
+                  </span>
+                </div>
+                <Button size="small" onClick={resetCompare}>
+                  重新选择
+                </Button>
+              </div>
+
+              <Divider orientation="left" className="mt-0">核心指标差异</Divider>
+              <Row gutter={[16, 16]} className="mb-5">
+                {[
+                  { label: '合格率', diff: compareResult.metricsDiff.passRate, unit: '%' },
+                  { label: '就业率', diff: compareResult.metricsDiff.employmentRate, unit: '%' },
+                  { label: '证书周期', diff: compareResult.metricsDiff.certificateCycle, unit: '天', reverse: true },
+                ].map((item) => {
+                  const isGood = item.reverse ? item.diff.diff <= 0 : item.diff.diff >= 0;
+                  const diffColor = isGood ? 'text-emerald-600' : 'text-red-600';
+                  const diffIcon = item.diff.diff >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />;
+                  return (
+                    <Col xs={24} sm={8} key={item.label}>
+                      <Card size="small" className="shadow-sm">
+                        <div className="text-xs text-gray-500 mb-2">{item.label}</div>
+                        <div className="flex items-end gap-2 mb-2">
+                          <span className="text-xl font-bold text-gray-900">
+                            {item.diff.now.toFixed(1)}{item.unit}
+                          </span>
+                          <span className="text-sm text-gray-400">
+                            原 {item.diff.old.toFixed(1)}{item.unit}
+                          </span>
+                        </div>
+                        <div className={`text-sm font-medium ${diffColor} flex items-center gap-1`}>
+                          {diffIcon}
+                          {Math.abs(item.diff.diff).toFixed(1)}{item.unit}
+                          <span className="text-xs text-gray-500 ml-1">
+                            ({isGood ? '正向' : '反向'}变化)
+                          </span>
+                        </div>
+                      </Card>
+                    </Col>
+                  );
+                })}
+              </Row>
+
+              <Divider orientation="left">差异分析摘要</Divider>
+              <div className="p-4 bg-blue-50 rounded-lg mb-5 whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">
+                {compareResult.analysisText}
+              </div>
+
+              {(compareResult.suggestionChanges.added.length > 0 || compareResult.suggestionChanges.removed.length > 0) && (
+                <>
+                  <Divider orientation="left">优化建议变化</Divider>
+                  <div className="space-y-3 mb-5">
+                    {compareResult.suggestionChanges.added.length > 0 && (
+                      <div>
+                        <div className="text-sm font-semibold text-emerald-700 mb-2">
+                          <PlusOutlined className="mr-1" /> 新增建议 ({compareResult.suggestionChanges.added.length})
+                        </div>
+                        <div className="space-y-2">
+                          {compareResult.suggestionChanges.added.map((s, i) => (
+                            <div key={s.id + i} className="p-3 bg-emerald-50 rounded text-sm text-gray-700 flex items-start gap-2">
+                              <Tag color={s.category === 'curriculum' ? 'blue' : 'purple'} style={{ margin: 0 }}>
+                                {s.category === 'curriculum' ? '课程' : '师资'}
+                              </Tag>
+                              <span className="flex-1">{s.content}</span>
+                              <Tag color={s.priority === 'high' ? 'red' : s.priority === 'medium' ? 'orange' : 'default'} style={{ margin: 0 }}>
+                                {s.priority === 'high' ? '高' : s.priority === 'medium' ? '中' : '低'}
+                              </Tag>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {compareResult.suggestionChanges.removed.length > 0 && (
+                      <div>
+                        <div className="text-sm font-semibold text-gray-500 mb-2">
+                          <MinusOutlined className="mr-1" /> 已完成/移除建议 ({compareResult.suggestionChanges.removed.length})
+                        </div>
+                        <div className="space-y-2">
+                          {compareResult.suggestionChanges.removed.map((s, i) => (
+                            <div key={s.id + 'r' + i} className="p-3 bg-gray-50 rounded text-sm text-gray-500 line-through flex items-start gap-2">
+                              <Tag color={s.category === 'curriculum' ? 'blue' : 'purple'} style={{ margin: 0 }}>
+                                {s.category === 'curriculum' ? '课程' : '师资'}
+                              </Tag>
+                              <span className="flex-1">{s.content}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button onClick={() => { setCompareModalVisible(false); resetCompare(); }}>
+                  关闭
+                </Button>
+              </div>
+            </div>
+          )}
         </Modal>
       </div>
     </div>

@@ -696,6 +696,7 @@ export function generateWeeklyReport(
       employmentRate,
       yearOverYearChange: yoy,
       weekOverWeekChange: wow,
+      certificateCycleDays: 14 + Math.floor(Math.random() * 6),
     },
     sections: [
       {

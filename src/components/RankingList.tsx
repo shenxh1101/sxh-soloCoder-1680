@@ -6,6 +6,7 @@ interface RankingListProps {
   data: RankingItem[];
   title: string;
   unit?: string;
+  onItemClick?: (item: RankingItem, index: number) => void;
 }
 
 const rankStyles: Record<number, {
@@ -34,7 +35,7 @@ const rankStyles: Record<number, {
   },
 };
 
-export default function RankingList({ data, title, unit }: RankingListProps) {
+export default function RankingList({ data, title, unit, onItemClick }: RankingListProps) {
   const maxValue = Math.max(...data.map(item => item.value), 1);
 
   return (
@@ -52,15 +53,18 @@ export default function RankingList({ data, title, unit }: RankingListProps) {
             const hasChange = item.change !== undefined && item.change !== null;
             const isUp = hasChange && item.change! > 0;
             const isDown = hasChange && item.change! < 0;
+            const isClickable = !!onItemClick && !!item.institutionId;
 
             return (
               <li
                 key={item.name}
+                onClick={() => isClickable && onItemClick?.(item, index)}
                 className={cn(
                   'group relative rounded-xl p-4 transition-all duration-200',
                   style
                     ? cn('bg-white/5 hover:bg-white/10 ring-1', style.ring, 'shadow-lg', style.glow)
-                    : 'bg-white/[0.02] hover:bg-white/5'
+                    : 'bg-white/[0.02] hover:bg-white/5',
+                  isClickable && 'cursor-pointer hover:ring-2 hover:ring-blue-400/50'
                 )}
               >
                 {style && (

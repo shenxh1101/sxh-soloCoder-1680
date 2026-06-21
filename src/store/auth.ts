@@ -13,6 +13,7 @@ interface AuthState {
   filterProvinces: (provinces: RegionData[]) => RegionData[];
   filterWarnings: (warnings: Warning[]) => Warning[];
   filterReports: (reports: WeeklyReport[]) => WeeklyReport[];
+  getReportAccessibleRegions: () => string[];
   filterInstitutions: (institutions: Institution[]) => Institution[];
   getViewScope: () => { level: 'country' | 'province' | 'city' | 'institution'; code: string; name: string };
   getAccessibleCityData: () => RegionData[];
@@ -20,6 +21,7 @@ interface AuthState {
   getCurrentMetrics: (nationalMetrics: RegionData | null, provinceData: RegionData[]) => RegionData | null;
   canAccessRegion: (regionCode: string) => boolean;
   canAccessReport: (reportRegionCode: string) => boolean;
+  canAccessInstitution: (institutionId: string) => boolean;
 }
 
 const STORAGE_KEY = 'auth_user';
@@ -111,7 +113,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   filterReports: (reports: WeeklyReport[]) => {
-    return get().getRegionFilter<WeeklyReport>(reports);
+    const { user } = get();
+    if (!user) return reports;
+    if (user.role === 'institution' || user.role === 'academic') return [];
+    if (user.role === 'national') return reports;
+    return reports.filter((r) => r.regionCode === user.regionCode);
+  },
+
+  getReportAccessibleRegions: () => {
+    const { user } = get();
+    if (!user) return ['000000'];
+    if (user.role === 'national') {
+      return ['000000', ...regionHierarchy['000000'].children];
+    }
+    if (user.role === 'province' || user.role === 'city') {
+      return [user.regionCode];
+    }
+    return [user.regionCode];
   },
 
   filterInstitutions: (institutions: Institution[]) => {
@@ -261,5 +279,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     return nationalMetrics;
+  },
+
+  canAccessInstitution: (institutionId: string): boolean => {
+    const { user } = get();
+    if (!user) return false;
+    if (user.role === 'national') return true;
+
+    const inst = institutions.find((i) => i.id === institutionId);
+    if (!inst) return false;
+
+    if (user.role === 'province') {
+      const accessibleRegions = get().getAccessibleRegions();
+      return accessibleRegions.includes(inst.regionCode);
+    }
+
+    if (user.role === 'city') {
+      return inst.regionCode === user.regionCode;
+    }
+
+    if (user.role === 'institution' || user.role === 'academic') {
+      return user.institutionId === institutionId;
+    }
+
+    return false;
   },
 }));

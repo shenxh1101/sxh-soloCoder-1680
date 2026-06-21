@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Warning, WarningApprovalStatus } from '../types';
+import type { Warning, WarningApprovalStatus, RectificationTracking, RectificationMilestone } from '../types';
 import { mockWarnings } from '../mock/data';
 
 const STORAGE_KEY = 'warnings_data';
@@ -26,12 +26,19 @@ const saveWarningsToStorage = (warnings: Warning[]) => {
 
 const updateApprovalStatus = (warning: Warning): Warning => {
   const { steps, currentStep } = warning.approvalFlow;
-  
+  const rect = warning.rectification;
+
   let approvalStatus: WarningApprovalStatus = 'pending';
-  
+
   const hasRejected = steps.some(s => s.status === 'rejected');
   if (hasRejected) {
     approvalStatus = 'rejected';
+  } else if (rect?.reviewResult === 'pass') {
+    approvalStatus = 'closed';
+  } else if (rect && rect.milestones.length > 0 && rect.milestones.every(m => m.status === 'completed') && !rect.reviewResult) {
+    approvalStatus = 'pending_review';
+  } else if (rect && rect.milestones.length > 0) {
+    approvalStatus = 'rectification_in_progress';
   } else if (currentStep > 3) {
     approvalStatus = 'province_approved';
   } else if (currentStep === 3) {
@@ -46,11 +53,57 @@ const updateApprovalStatus = (warning: Warning): Warning => {
   }
 
   const hasRectification = steps.some(s => s.title === '提交整改方案' && s.status === 'completed');
-  if (hasRectification && !hasRejected && approvalStatus !== 'province_approved') {
+  if (hasRectification && !hasRejected && approvalStatus === 'pending') {
     approvalStatus = 'rectification_submitted';
   }
 
   return { ...warning, approvalStatus };
+};
+
+const addDays = (date: Date, days: number) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+const formatDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const defaultRectificationPlan = (warningId: string): RectificationTracking => {
+  const now = new Date();
+  return {
+    id: `rect_${warningId}`,
+    warningId,
+    plan: '加强师资配置，完善课程体系，建立定期质量监控机制。具体包括：1) 对现有教师进行技能再培训；2) 补充实操教学设备；3) 优化课程大纲；4) 建立月度质量评估制度。',
+    startDate: formatDate(now),
+    expectedEndDate: formatDate(addDays(now, 60)),
+    milestones: [
+      {
+        id: `${warningId}_m1`,
+        title: '师资培训完成',
+        deadline: formatDate(addDays(now, 15)),
+        status: 'pending',
+      },
+      {
+        id: `${warningId}_m2`,
+        title: '设备补充到位',
+        deadline: formatDate(addDays(now, 30)),
+        status: 'pending',
+      },
+      {
+        id: `${warningId}_m3`,
+        title: '课程大纲优化完成',
+        deadline: formatDate(addDays(now, 45)),
+        status: 'pending',
+      },
+      {
+        id: `${warningId}_m4`,
+        title: '质量监控体系建立并试运行',
+        deadline: formatDate(addDays(now, 60)),
+        status: 'pending',
+      },
+    ],
+  };
 };
 
 interface WarningState {
@@ -63,6 +116,10 @@ interface WarningState {
   approveStep: (step: 1 | 2 | 3, comment: string) => void;
   rejectStep: (step: 1 | 2 | 3, comment: string) => void;
   submitRectificationPlan: (step: 1 | 2 | 3, plan: string) => void;
+  startRectification: (warningId: string, plan?: string) => void;
+  updateMilestone: (warningId: string, milestoneId: string, status: RectificationMilestone['status'], remark?: string) => void;
+  submitReview: (warningId: string, result: 'pass' | 'fail', comment: string) => void;
+  saveAndPersist: (warning: Warning) => void;
 }
 
 export const useWarningStore = create<WarningState>((set, get) => ({
@@ -74,38 +131,45 @@ export const useWarningStore = create<WarningState>((set, get) => ({
   fetchWarnings: async () => {
     set({ loading: true });
     await new Promise((resolve) => setTimeout(resolve, 300));
-    
+
     const storedWarnings = loadWarningsFromStorage();
     let warnings: Warning[];
-    
+
     if (storedWarnings.length > 0) {
-      warnings = storedWarnings;
+      warnings = storedWarnings.map(w => updateApprovalStatus(w));
     } else {
       warnings = mockWarnings.map(w => updateApprovalStatus(w));
       saveWarningsToStorage(warnings);
     }
-    
+
     set({ warnings, loading: false, initialized: true });
   },
 
   fetchWarningDetail: async (id: string) => {
     set({ loading: true });
     await new Promise((resolve) => setTimeout(resolve, 200));
-    
+
     const { warnings, initialized, fetchWarnings } = get();
-    
+
     if (!initialized || warnings.length === 0) {
       await fetchWarnings();
     }
-    
+
     const currentWarnings = get().warnings;
     const warning = currentWarnings.find((w) => w.id === id) || null;
-    
+
     set({ currentWarning: warning, loading: false });
   },
 
+  saveAndPersist: (warning: Warning) => {
+    const updatedWarning = updateApprovalStatus(warning);
+    const updatedWarnings = get().warnings.map(w => w.id === warning.id ? updatedWarning : w);
+    saveWarningsToStorage(updatedWarnings);
+    set({ warnings: updatedWarnings, currentWarning: updatedWarning });
+  },
+
   approveStep: (step: 1 | 2 | 3, comment: string) => {
-    const { currentWarning, warnings } = get();
+    const { currentWarning } = get();
     if (!currentWarning) return;
 
     const now = new Date();
@@ -115,7 +179,7 @@ export const useWarningStore = create<WarningState>((set, get) => ({
 
     let updatedWarning: Warning = {
       ...currentWarning,
-      status: step === 3 ? 'resolved' : 'processing',
+      status: step === 3 ? 'rectification' : 'processing',
       approvalFlow: {
         ...currentWarning.approvalFlow,
         currentStep: nextStep as 0 | 1 | 2 | 3 | 4,
@@ -139,18 +203,15 @@ export const useWarningStore = create<WarningState>((set, get) => ({
       },
     };
 
-    updatedWarning = updateApprovalStatus(updatedWarning);
+    if (step === 3 && !updatedWarning.rectification) {
+      updatedWarning.rectification = defaultRectificationPlan(updatedWarning.id);
+    }
 
-    const updatedWarnings = warnings.map((w) =>
-      w.id === currentWarning.id ? updatedWarning : w
-    );
-
-    saveWarningsToStorage(updatedWarnings);
-    set({ currentWarning: updatedWarning, warnings: updatedWarnings });
+    get().saveAndPersist(updatedWarning);
   },
 
   rejectStep: (step: 1 | 2 | 3, comment: string) => {
-    const { currentWarning, warnings } = get();
+    const { currentWarning } = get();
     if (!currentWarning) return;
 
     const now = new Date();
@@ -183,18 +244,11 @@ export const useWarningStore = create<WarningState>((set, get) => ({
       },
     };
 
-    updatedWarning = updateApprovalStatus(updatedWarning);
-
-    const updatedWarnings = warnings.map((w) =>
-      w.id === currentWarning.id ? updatedWarning : w
-    );
-
-    saveWarningsToStorage(updatedWarnings);
-    set({ currentWarning: updatedWarning, warnings: updatedWarnings });
+    get().saveAndPersist(updatedWarning);
   },
 
   submitRectificationPlan: (step: 1 | 2 | 3, plan: string) => {
-    const { currentWarning, warnings } = get();
+    const { currentWarning } = get();
     if (!currentWarning) return;
 
     const now = new Date();
@@ -232,13 +286,72 @@ export const useWarningStore = create<WarningState>((set, get) => ({
       },
     };
 
-    updatedWarning = updateApprovalStatus(updatedWarning);
+    get().saveAndPersist(updatedWarning);
+  },
 
-    const updatedWarnings = warnings.map((w) =>
-      w.id === currentWarning.id ? updatedWarning : w
+  startRectification: (warningId: string, plan?: string) => {
+    const warning = get().warnings.find(w => w.id === warningId);
+    if (!warning) return;
+
+    const rect = warning.rectification || defaultRectificationPlan(warningId);
+    const updatedRect: RectificationTracking = {
+      ...rect,
+      plan: plan || rect.plan,
+      milestones: rect.milestones.map((m, i) => ({
+        ...m,
+        status: i === 0 ? 'in_progress' : m.status,
+      })),
+    };
+
+    const updatedWarning: Warning = {
+      ...warning,
+      status: 'rectification',
+      rectification: updatedRect,
+    };
+
+    get().saveAndPersist(updatedWarning);
+  },
+
+  updateMilestone: (warningId: string, milestoneId: string, status: RectificationMilestone['status'], remark?: string) => {
+    const warning = get().warnings.find(w => w.id === warningId);
+    if (!warning || !warning.rectification) return;
+
+    const now = new Date();
+    const updatedMilestones = warning.rectification.milestones.map(m =>
+      m.id === milestoneId
+        ? { ...m, status, remark, completedAt: status === 'completed' ? formatDate(now) : m.completedAt }
+        : m
     );
 
-    saveWarningsToStorage(updatedWarnings);
-    set({ currentWarning: updatedWarning, warnings: updatedWarnings });
+    const updatedWarning: Warning = {
+      ...warning,
+      rectification: {
+        ...warning.rectification,
+        milestones: updatedMilestones,
+      },
+    };
+
+    get().saveAndPersist(updatedWarning);
+  },
+
+  submitReview: (warningId: string, result: 'pass' | 'fail', comment: string) => {
+    const warning = get().warnings.find(w => w.id === warningId);
+    if (!warning || !warning.rectification) return;
+
+    const now = new Date();
+    const updatedWarning: Warning = {
+      ...warning,
+      status: result === 'pass' ? 'resolved' : 'rectification',
+      rectification: {
+        ...warning.rectification,
+        reviewResult: result,
+        reviewComment: comment,
+        reviewDate: formatDate(now),
+        reviewer: '当前用户',
+        actualEndDate: result === 'pass' ? formatDate(now) : warning.rectification.actualEndDate,
+      },
+    };
+
+    get().saveAndPersist(updatedWarning);
   },
 }));

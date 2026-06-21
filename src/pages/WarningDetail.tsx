@@ -12,6 +12,9 @@ import {
   Row,
   Col,
   Modal,
+  Steps,
+  Divider,
+  Alert,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -19,6 +22,9 @@ import {
   CloseCircleOutlined,
   FileTextOutlined,
   ExclamationCircleOutlined,
+  EditOutlined,
+  ClockCircleOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
@@ -26,7 +32,7 @@ import dayjs from 'dayjs';
 import { useWarningStore } from '@/store/warning';
 import { useAuthStore } from '@/store/auth';
 import ApprovalTimeline from '@/components/ApprovalTimeline';
-import type { User } from '@/types';
+import type { User, RectificationMilestone } from '@/types';
 
 const { TextArea } = Input;
 const { confirm } = Modal;
@@ -47,6 +53,25 @@ const statusConfig: Record<string, { color: string; text: string }> = {
   pending: { color: 'warning', text: '待处理' },
   processing: { color: 'processing', text: '处理中' },
   resolved: { color: 'success', text: '已解决' },
+  rectification: { color: 'geekblue', text: '整改中' },
+};
+
+const approvalStatusText: Record<string, string> = {
+  pending: '待审批',
+  institution_approved: '机构已确认',
+  district_approved: '区级已复核',
+  province_approved: '省级已批准',
+  rejected: '已驳回',
+  rectification_submitted: '整改方案已提交',
+  rectification_in_progress: '整改中',
+  pending_review: '待复查',
+  closed: '已闭环',
+};
+
+const milestoneStatusMap: Record<string, { color: string; text: string }> = {
+  pending: { color: 'default', text: '待开始' },
+  in_progress: { color: 'processing', text: '进行中' },
+  completed: { color: 'success', text: '已完成' },
 };
 
 const stepRoleMap: Record<number, User['role'][]> = {
@@ -58,11 +83,25 @@ const stepRoleMap: Record<number, User['role'][]> = {
 export default function WarningDetail() {
   const { warningId } = useParams<{ warningId: string }>();
   const navigate = useNavigate();
-  const { currentWarning, fetchWarningDetail, approveStep, rejectStep, submitRectificationPlan, loading } = useWarningStore();
+  const {
+    currentWarning,
+    fetchWarningDetail,
+    approveStep,
+    rejectStep,
+    submitRectificationPlan,
+    startRectification,
+    updateMilestone,
+    submitReview,
+    loading,
+  } = useWarningStore();
   const { user } = useAuthStore();
   const [form] = Form.useForm();
+  const [reviewForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [operationType, setOperationType] = useState<'approve' | 'reject' | 'plan' | null>(null);
+  const [rectificationVisible, setRectificationVisible] = useState(false);
+  const [milestoneRemark, setMilestoneRemark] = useState('');
+  const [activeMilestoneId, setActiveMilestoneId] = useState<string | null>(null);
 
   useEffect(() => {
     if (warningId) {
@@ -82,6 +121,27 @@ export default function WarningDetail() {
     if (!currentWarning) return false;
     return currentWarning.approvalFlow.currentStep > 3 || currentWarning.status === 'resolved';
   }, [currentWarning]);
+
+  const showRectification = useMemo(() => {
+    return !!currentWarning?.rectification;
+  }, [currentWarning]);
+
+  const canStartRectification = useMemo(() => {
+    if (!currentWarning || !user) return false;
+    return (
+      currentWarning.approvalFlow.currentStep > 3 &&
+      !currentWarning.rectification &&
+      (user.role === 'institution' || user.role === 'academic')
+    );
+  }, [currentWarning, user]);
+
+  const canReview = useMemo(() => {
+    if (!currentWarning || !user) return false;
+    const rect = currentWarning.rectification;
+    if (!rect || rect.reviewResult) return false;
+    if (user.role !== 'province' && user.role !== 'city') return false;
+    return rect.milestones.length > 0 && rect.milestones.every(m => m.status === 'completed');
+  }, [currentWarning, user]);
 
   const trendOption = useMemo(() => {
     const months = [];
@@ -192,7 +252,7 @@ export default function WarningDetail() {
 
     if (action === 'approve') {
       title = '确认通过';
-      content = `确认通过第 ${step} 步审批？此操作将推进到下一步。`;
+      content = `确认通过第 ${step} 步审批？此操作将推进到下一步。审批完成后自动进入整改跟踪阶段。`;
       okText = '确认通过';
       okType = 'primary';
     } else if (action === 'reject') {
@@ -265,6 +325,91 @@ export default function WarningDetail() {
     }
   };
 
+  const handleStartRectification = () => {
+    if (!currentWarning) return;
+    setRectificationVisible(true);
+  };
+
+  const handleStartRectificationConfirm = async () => {
+    try {
+      const values = await reviewForm.validateFields();
+      if (!currentWarning) return;
+      startRectification(currentWarning.id, values.plan);
+      message.success('整改计划已启动');
+      setRectificationVisible(false);
+      reviewForm.resetFields();
+    } catch {
+      // Validation failed
+    }
+  };
+
+  const handleMilestoneStatusChange = (milestoneId: string, status: RectificationMilestone['status']) => {
+    if (!currentWarning) return;
+    if (status === 'completed') {
+      setActiveMilestoneId(milestoneId);
+      setMilestoneRemark('');
+      Modal.confirm({
+        title: '确认完成此节点',
+        icon: <CheckCircleOutlined className="text-green-500" />,
+        content: (
+          <div>
+            <p className="text-gray-700 mb-3">确认该整改节点已完成？</p>
+            <TextArea
+              rows={3}
+              placeholder="请填写完成说明..."
+              value={milestoneRemark}
+              onChange={e => setMilestoneRemark(e.target.value)}
+            />
+          </div>
+        ),
+        okText: '确认完成',
+        cancelText: '取消',
+        onOk: () => {
+          updateMilestone(currentWarning.id, milestoneId, 'completed', milestoneRemark || '已按计划完成整改');
+          message.success('节点状态已更新');
+        },
+      });
+    } else if (status === 'in_progress') {
+      updateMilestone(currentWarning.id, milestoneId, 'in_progress');
+      message.success('节点状态已更新');
+    }
+  };
+
+  const handleSubmitReview = async (result: 'pass' | 'fail') => {
+    try {
+      const values = await reviewForm.validateFields();
+      if (!currentWarning) return;
+
+      confirm({
+        title: result === 'pass' ? '确认整改通过' : '确认整改不通过',
+        icon: <AuditOutlined className={result === 'pass' ? 'text-green-500' : 'text-red-500'} />,
+        content: (
+          <div>
+            <p className="text-gray-700 mb-3">
+              {result === 'pass'
+                ? '确认整改结果符合要求？通过后该预警将标记为已闭环。'
+                : '确认整改结果未达标？不通过后需继续整改。'}
+            </p>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-500 mb-1">复查意见：</p>
+              <p className="text-gray-800 font-medium">{values.reviewComment}</p>
+            </div>
+          </div>
+        ),
+        okText: result === 'pass' ? '确认通过' : '确认不通过',
+        okType: result === 'pass' ? 'primary' : 'danger',
+        cancelText: '取消',
+        onOk: () => {
+          submitReview(currentWarning.id, result, values.reviewComment);
+          message.success(result === 'pass' ? '复查通过，预警已闭环' : '复查不通过，需继续整改');
+          reviewForm.resetFields();
+        },
+      });
+    } catch {
+      // Validation failed
+    }
+  };
+
   if (loading && !currentWarning) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -288,6 +433,7 @@ export default function WarningDetail() {
 
   const statusCfg = statusConfig[currentWarning.status] || statusConfig.pending;
   const currentStepData = currentWarning.approvalFlow.steps[currentWarning.approvalFlow.currentStep - 1];
+  const rect = currentWarning.rectification;
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -301,7 +447,14 @@ export default function WarningDetail() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">预警详情</h1>
-            <p className="text-gray-500 text-sm">预警编号：{currentWarning.id}</p>
+            <p className="text-gray-500 text-sm">
+              预警编号：{currentWarning.id}
+              {currentWarning.approvalStatus && (
+                <span className="ml-3">
+                  当前进度：{approvalStatusText[currentWarning.approvalStatus] || currentWarning.approvalStatus}
+                </span>
+              )}
+            </p>
           </div>
           <Tag color={statusCfg.color} style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 14 }}>
             {statusCfg.text}
@@ -367,6 +520,184 @@ export default function WarningDetail() {
             currentStep={currentWarning.approvalFlow.currentStep}
           />
         </Card>
+
+        {showRectification && rect && (
+          <Card
+            className="mb-6 shadow-sm"
+            title={
+              <Space>
+                <span className="text-gray-900 font-semibold">整改跟踪</span>
+                <Tag color="geekblue">{approvalStatusText[currentWarning.approvalStatus] || '-'}</Tag>
+              </Space>
+            }
+          >
+            <Descriptions
+              column={2}
+              labelStyle={{ color: '#6b7280', width: 120, fontWeight: 500 }}
+              contentStyle={{ color: '#1f2937' }}
+              className="mb-6"
+            >
+              <Descriptions.Item label="整改开始">
+                {rect.startDate}
+              </Descriptions.Item>
+              <Descriptions.Item label="计划完成">
+                {rect.expectedEndDate}
+                {rect.actualEndDate && (
+                  <Tag color="green" className="ml-2">
+                    实际：{rect.actualEndDate}
+                  </Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="整改计划" span={2}>
+                <div className="p-3 bg-blue-50 rounded text-gray-700 leading-relaxed">
+                  {rect.plan}
+                </div>
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Divider orientation="left" plain className="mb-4">
+              <span className="font-semibold text-gray-700">整改里程碑</span>
+            </Divider>
+            <Steps
+              direction="vertical"
+              current={rect.milestones.findIndex(m => m.status !== 'completed') === -1
+                ? rect.milestones.length
+                : rect.milestones.findIndex(m => m.status === 'in_progress' || m.status === 'pending')}
+              className="mb-4"
+              items={rect.milestones.map((m, idx) => ({
+                title: (
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{m.title}</span>
+                    <Tag color={milestoneStatusMap[m.status].color}>
+                      {milestoneStatusMap[m.status].text}
+                    </Tag>
+                  </div>
+                ),
+                description: (
+                  <div className="text-sm">
+                    <div className="text-gray-500 mb-2">
+                      计划完成日期：{m.deadline}
+                      {m.completedAt && (
+                        <span className="ml-3 text-green-600">实际完成：{m.completedAt}</span>
+                      )}
+                    </div>
+                    {m.remark && (
+                      <div className="text-gray-600 p-2 bg-gray-50 rounded">
+                        说明：{m.remark}
+                      </div>
+                    )}
+                    {m.status === 'pending' && !rect.reviewResult && (
+                      <div className="mt-2">
+                        <Button
+                          size="small"
+                          type="primary"
+                          onClick={() => handleMilestoneStatusChange(m.id, 'in_progress')}
+                        >
+                          开始整改
+                        </Button>
+                      </div>
+                    )}
+                    {m.status === 'in_progress' && !rect.reviewResult && (
+                      <div className="mt-2">
+                        <Button
+                          size="small"
+                          type="primary"
+                          onClick={() => handleMilestoneStatusChange(m.id, 'completed')}
+                        >
+                          标记完成
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ),
+                status: m.status === 'completed' ? 'finish' : m.status === 'in_progress' ? 'process' : 'wait',
+              }))}
+            />
+
+            {rect.reviewResult && (
+              <>
+                <Divider orientation="left" plain className="mb-4">
+                  <span className="font-semibold text-gray-700">复查结果</span>
+                </Divider>
+                <Alert
+                  message={rect.reviewResult === 'pass' ? '复查通过，整改已闭环' : '复查不通过，需继续整改'}
+                  description={
+                    <div>
+                      <p className="mb-1">
+                        <strong>复查人：</strong>{rect.reviewer}
+                      </p>
+                      <p className="mb-1">
+                        <strong>复查日期：</strong>{rect.reviewDate}
+                      </p>
+                      <p className="mb-1">
+                        <strong>复查意见：</strong>{rect.reviewComment}
+                      </p>
+                    </div>
+                  }
+                  type={rect.reviewResult === 'pass' ? 'success' : 'warning'}
+                  showIcon
+                />
+              </>
+            )}
+
+            {canReview && (
+              <>
+                <Divider orientation="left" plain className="mb-4">
+                  <span className="font-semibold text-gray-700">复查审批</span>
+                </Divider>
+                <Form form={reviewForm} layout="vertical">
+                  <Form.Item
+                    name="reviewComment"
+                    label={<span className="font-medium text-gray-700">复查意见</span>}
+                    rules={[{ required: true, message: '请填写复查意见' }]}
+                  >
+                    <TextArea
+                      rows={3}
+                      placeholder="请填写复查意见..."
+                      className="!bg-white"
+                    />
+                  </Form.Item>
+                  <Space>
+                    <Button
+                      type="primary"
+                      icon={<CheckCircleOutlined />}
+                      onClick={() => handleSubmitReview('pass')}
+                    >
+                      通过整改
+                    </Button>
+                    <Button
+                      danger
+                      icon={<CloseCircleOutlined />}
+                      onClick={() => handleSubmitReview('fail')}
+                    >
+                      不通过，继续整改
+                    </Button>
+                  </Space>
+                </Form>
+              </>
+            )}
+          </Card>
+        )}
+
+        {canStartRectification && (
+          <Alert
+            message="审批已完成，请启动整改计划"
+            description="该预警已通过三级审批，现在可以启动整改跟踪，记录整改计划、完成节点和复查结果。"
+            type="info"
+            showIcon
+            action={
+              <Button
+                size="small"
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={handleStartRectification}
+              >
+                启动整改计划
+              </Button>
+            }
+            className="mb-6"
+          />
+        )}
 
         <Row gutter={24}>
           <Col xs={24} lg={12}>
@@ -477,6 +808,44 @@ export default function WarningDetail() {
             </Card>
           </Col>
         </Row>
+
+        <Modal
+          title="启动整改计划"
+          open={rectificationVisible}
+          onCancel={() => { setRectificationVisible(false); reviewForm.resetFields(); }}
+          footer={null}
+          destroyOnClose
+          width={600}
+        >
+          <Form form={reviewForm} layout="vertical">
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+              <ClockCircleOutlined className="mr-1" />
+              请填写详细的整改计划。系统将自动生成4个标准里程碑节点，您可后续在详情页更新各节点进度。
+            </div>
+            <Form.Item
+              name="plan"
+              label={<span className="font-medium text-gray-700">整改计划</span>}
+              rules={[{ required: true, message: '请填写整改计划' }]}
+              initialValue="加强师资配置，完善课程体系，建立定期质量监控机制。具体包括：1) 对现有教师进行技能再培训；2) 补充实操教学设备；3) 优化课程大纲；4) 建立月度质量评估制度。"
+            >
+              <TextArea rows={5} placeholder="请输入详细整改计划..." />
+            </Form.Item>
+            <Form.Item className="mb-0">
+              <Space className="w-full justify-end">
+                <Button onClick={() => { setRectificationVisible(false); reviewForm.resetFields(); }}>
+                  取消
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<CheckCircleOutlined />}
+                  onClick={handleStartRectificationConfirm}
+                >
+                  启动整改
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
       </div>
     </div>
   );

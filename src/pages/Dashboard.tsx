@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Segmented, Card, Tag, List, Alert } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { Segmented, Card, Tag, List, Alert, message } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import MetricsCard from '@/components/MetricsCard';
@@ -7,7 +8,7 @@ import RankingList from '@/components/RankingList';
 import { useDashboardStore } from '@/store/dashboard';
 import { useAuthStore } from '@/store/auth';
 import { registerChinaMap } from '@/lib/chinaMap';
-import { regionNameMap } from '@/mock/data';
+import { regionNameMap, institutions } from '@/mock/data';
 import type { RankingItem, OccupationData, RegionData } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -44,12 +45,15 @@ const roleNameMap: Record<string, string> = {
 
 export default function Dashboard() {
   const [mapReady, setMapReady] = useState(false);
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const filterProvinces = useAuthStore((state) => state.filterProvinces);
   const getViewScope = useAuthStore((state) => state.getViewScope);
   const getAccessibleCityData = useAuthStore((state) => state.getAccessibleCityData);
   const filterOccupationData = useAuthStore((state) => state.filterOccupationData);
   const getCurrentMetrics = useAuthStore((state) => state.getCurrentMetrics);
+  const filterInstitutions = useAuthStore((state) => state.filterInstitutions);
+  const canAccessInstitution = useAuthStore((state) => state.canAccessInstitution);
 
   const {
     viewMode,
@@ -116,6 +120,19 @@ export default function Dashboard() {
         }));
     }
 
+    const accessibleInstitutions = filterInstitutions(institutions);
+    if ((viewScope.level === 'province' || viewScope.level === 'city') && accessibleInstitutions.length > 0) {
+      return [...accessibleInstitutions]
+        .sort((a, b) => b.metrics.passRate - a.metrics.passRate)
+        .map((inst, idx) => ({
+          name: inst.name,
+          value: inst.metrics.passRate,
+          change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
+          institutionId: inst.id,
+          regionCode: inst.regionCode,
+        }));
+    }
+
     if (viewScope.level === 'city') {
       return [...displayCityData]
         .sort((a, b) => b.metrics.passRate - a.metrics.passRate)
@@ -143,7 +160,7 @@ export default function Dashboard() {
         value: p.metrics.passRate,
         change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
       }));
-  }, [viewMode, filteredProvinceData, filteredOccupationData, viewScope.level, displayCityData]);
+  }, [viewMode, filteredProvinceData, filteredOccupationData, viewScope.level, displayCityData, filterInstitutions]);
 
   const mapOption = useMemo(() => {
     const data = viewScope.level === 'country'
@@ -728,6 +745,15 @@ export default function Dashboard() {
     };
   }, [filteredOccupationData]);
 
+  const handleRankingItemClick = (item: RankingItem) => {
+    if (!item.institutionId) return;
+    if (!canAccessInstitution(item.institutionId)) {
+      message.warning('您无权查看该机构详情');
+      return;
+    }
+    navigate(`/institutions/${item.institutionId}`);
+  };
+
   const renderScopeInfo = () => {
     if (viewScope.level === 'country') return null;
     
@@ -884,6 +910,7 @@ export default function Dashboard() {
               data={rankingData} 
               title={viewScope.level === 'province' || viewScope.level === 'city' ? `${viewScope.name}合格率排名榜` : '合格率排名榜'} 
               unit="%" 
+              onItemClick={handleRankingItemClick}
             />
           </div>
         </div>

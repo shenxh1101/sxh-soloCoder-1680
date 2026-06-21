@@ -10,6 +10,7 @@ import Reports from "@/pages/Reports";
 import ReportDetail from "@/pages/ReportDetail";
 import TrainingPlan from "@/pages/TrainingPlan";
 import Institutions from "@/pages/Institutions";
+import InstitutionProfile from "@/pages/InstitutionProfile";
 import Layout from "@/components/Layout";
 import { useAuthStore } from "@/store/auth";
 
@@ -147,6 +148,16 @@ export default function App() {
               <RequireAuth>
                 <Layout>
                   <Institutions />
+                </Layout>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/institutions/:institutionId"
+            element={
+              <RequireAuth>
+                <Layout>
+                  <InstitutionProfile />
                 </Layout>
               </RequireAuth>
             }

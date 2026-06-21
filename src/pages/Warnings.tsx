@@ -29,6 +29,9 @@ const approvalStatusConfig: Record<string, { color: string; text: string }> = {
   province_approved: { color: 'green', text: '省级已批准' },
   rejected: { color: 'red', text: '已驳回' },
   rectification_submitted: { color: 'purple', text: '整改方案已提交' },
+  rectification_in_progress: { color: 'geekblue', text: '整改中' },
+  pending_review: { color: 'gold', text: '待复查' },
+  closed: { color: 'green', text: '已闭环' },
 };
 
 export default function Warnings() {
@@ -46,7 +49,18 @@ export default function Warnings() {
   const filteredWarnings = useMemo(() => {
     const permissionFiltered = filterWarnings(warnings);
     return permissionFiltered.filter((w) => {
-      const statusMatch = activeTab === 'all' || w.status === activeTab;
+      let statusMatch = true;
+      if (activeTab === 'all') {
+        statusMatch = true;
+      } else if (activeTab === 'rectification_in_progress') {
+        statusMatch = w.approvalStatus === 'rectification_in_progress';
+      } else if (activeTab === 'pending_review') {
+        statusMatch = w.approvalStatus === 'pending_review';
+      } else if (activeTab === 'closed') {
+        statusMatch = w.approvalStatus === 'closed' || w.status === 'resolved';
+      } else {
+        statusMatch = w.status === activeTab;
+      }
       const typeMatch = !warningType || w.type === warningType;
       const searchMatch =
         !searchText ||
@@ -167,7 +181,9 @@ export default function Warnings() {
     { key: 'all', label: `全部 (${permissionFilteredWarnings.length})` },
     { key: 'pending', label: `待处理 (${permissionFilteredWarnings.filter((w) => w.status === 'pending').length})` },
     { key: 'processing', label: `处理中 (${permissionFilteredWarnings.filter((w) => w.status === 'processing').length})` },
-    { key: 'resolved', label: `已解决 (${permissionFilteredWarnings.filter((w) => w.status === 'resolved').length})` },
+    { key: 'rectification_in_progress', label: `整改中 (${permissionFilteredWarnings.filter((w) => w.approvalStatus === 'rectification_in_progress').length})` },
+    { key: 'pending_review', label: `待复查 (${permissionFilteredWarnings.filter((w) => w.approvalStatus === 'pending_review').length})` },
+    { key: 'closed', label: `已闭环 (${permissionFilteredWarnings.filter((w) => w.approvalStatus === 'closed' || w.status === 'resolved').length})` },
   ];
 
   return (

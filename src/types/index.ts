@@ -36,6 +36,8 @@ export interface RankingItem {
   name: string;
   value: number;
   change?: number | null;
+  institutionId?: string;
+  regionCode?: string;
 }
 
 export type ApprovalRole = 'institution' | 'district' | 'city' | 'province' | 'academic';
@@ -68,7 +70,33 @@ export type WarningApprovalStatus =
   | 'district_approved' 
   | 'province_approved' 
   | 'rejected' 
-  | 'rectification_submitted';
+  | 'rectification_submitted'
+  | 'rectification_in_progress'
+  | 'pending_review'
+  | 'closed';
+
+export interface RectificationMilestone {
+  id: string;
+  title: string;
+  deadline: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  completedAt?: string;
+  remark?: string;
+}
+
+export interface RectificationTracking {
+  id: string;
+  warningId: string;
+  plan: string;
+  startDate: string;
+  expectedEndDate: string;
+  actualEndDate?: string;
+  milestones: RectificationMilestone[];
+  reviewResult?: 'pass' | 'fail';
+  reviewComment?: string;
+  reviewDate?: string;
+  reviewer?: string;
+}
 
 export interface Warning {
   id: string;
@@ -85,6 +113,7 @@ export interface Warning {
   approvalStatus: WarningApprovalStatus;
   createdAt: string;
   approvalFlow: ApprovalFlow;
+  rectification?: RectificationTracking;
 }
 
 export interface ValidationSummary {
@@ -130,6 +159,25 @@ export interface ReportMetrics {
   employmentRate: number;
   yearOverYearChange: number;
   weekOverWeekChange: number;
+  certificateCycleDays?: number;
+}
+
+export interface ReportDiffSummary {
+  id: string;
+  reportA: { id: string; weekStart: string; weekEnd: string; year: number; weekNumber: number };
+  reportB: { id: string; weekStart: string; weekEnd: string; year: number; weekNumber: number };
+  regionName: string;
+  metricsDiff: {
+    passRate: { old: number; now: number; diff: number };
+    employmentRate: { old: number; now: number; diff: number };
+    certificateCycle: { old: number; now: number; diff: number };
+  };
+  suggestionChanges: {
+    added: OptimizationSuggestion[];
+    removed: OptimizationSuggestion[];
+    sameCategory: OptimizationSuggestion[];
+  };
+  analysisText: string;
 }
 
 export interface OptimizationSuggestion {
