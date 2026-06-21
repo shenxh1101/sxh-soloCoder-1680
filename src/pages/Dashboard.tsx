@@ -116,7 +116,17 @@ export default function Dashboard() {
         }));
     }
 
-    if (viewScope.level === 'province' || (viewScope.level === 'city' && displayCityData.length > 0)) {
+    if (viewScope.level === 'city') {
+      return [...displayCityData]
+        .sort((a, b) => b.metrics.passRate - a.metrics.passRate)
+        .map((c, idx) => ({
+          name: c.regionName,
+          value: c.metrics.passRate,
+          change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
+        }));
+    }
+
+    if (viewScope.level === 'province' && displayCityData.length > 0) {
       return [...displayCityData]
         .sort((a, b) => b.metrics.passRate - a.metrics.passRate)
         .map((c, idx) => ({
@@ -136,8 +146,7 @@ export default function Dashboard() {
   }, [viewMode, filteredProvinceData, filteredOccupationData, viewScope.level, displayCityData]);
 
   const mapOption = useMemo(() => {
-    const showMap = viewScope.level === 'country' || viewScope.level === 'province';
-    const data = showMap && viewScope.level === 'country'
+    const data = viewScope.level === 'country'
       ? filteredProvinceData.map((p) => ({
           name: provinceNameMap[p.regionName] || p.regionName,
           value: p.metrics.totalTrainees,
@@ -145,7 +154,7 @@ export default function Dashboard() {
           regionCode: p.regionCode,
           fullName: p.regionName,
         }))
-      : showMap && viewScope.level === 'province'
+      : viewScope.level === 'province'
       ? (() => {
           const province = filteredProvinceData.find(p => p.regionCode === viewScope.code);
           return province ? [{
@@ -156,10 +165,47 @@ export default function Dashboard() {
             fullName: province.regionName,
           }] : [];
         })()
+      : viewScope.level === 'city'
+      ? (() => {
+          const city = displayCityData.find(c => c.regionCode === viewScope.code);
+          return city ? [{
+            name: city.regionName,
+            value: city.metrics.totalTrainees,
+            passRate: city.metrics.passRate,
+            regionCode: city.regionCode,
+            fullName: city.regionName,
+          }] : [];
+        })()
       : [];
 
     const maxValue = Math.max(...data.map((d) => d.value), 1);
     const minValue = Math.min(...data.map((d) => d.value), 0);
+
+    const provinceCenterMap: Record<string, [number, number]> = {
+      '440000': [113.3, 23.5],
+      '320000': [118.8, 32.1],
+      '330000': [120.2, 30.3],
+    };
+    const cityCenterMap: Record<string, [number, number]> = {
+      '440100': [113.3, 23.1],
+      '440300': [114.1, 22.5],
+      '440400': [113.6, 22.3],
+      '440600': [113.1, 23.0],
+      '440700': [113.1, 22.6],
+      '441300': [114.4, 23.1],
+      '441900': [113.8, 22.9],
+      '442000': [113.4, 22.5],
+    };
+
+    let mapZoom = 1.2;
+    let mapCenter: [number, number] | undefined = [104, 37];
+    if (viewScope.level === 'province') {
+      mapZoom = 4;
+      mapCenter = provinceCenterMap[viewScope.code] || [113.3, 23.5];
+    } else if (viewScope.level === 'city') {
+      mapZoom = 8;
+      mapCenter = cityCenterMap[viewScope.code] || [113.3, 23.1];
+    }
 
     return {
       title: {
@@ -205,10 +251,12 @@ export default function Dashboard() {
       geo: {
         map: 'china',
         roam: true,
-        zoom: viewScope.level === 'country' ? 1.2 : 2,
-        center: viewScope.level === 'country' ? [104, 37] : undefined,
+        zoom: mapZoom,
+        center: mapCenter,
         label: {
-          show: false,
+          show: viewScope.level === 'city',
+          color: '#1f2937',
+          fontSize: 12,
         },
         emphasis: {
           label: {
@@ -236,6 +284,19 @@ export default function Dashboard() {
             areaColor: '#4f46e5',
           },
         },
+        regions: viewScope.level === 'city' ? [{
+          name: '广东',
+          itemStyle: {
+            areaColor: '#3b82f6',
+            borderColor: '#2563eb',
+            borderWidth: 2,
+          },
+          label: {
+            show: true,
+            color: '#fff',
+            fontSize: 12,
+          },
+        }] : [],
       },
       series: [
         {
@@ -247,7 +308,7 @@ export default function Dashboard() {
         },
       ],
     };
-  }, [filteredProvinceData, viewScope]);
+  }, [filteredProvinceData, viewScope, displayCityData]);
 
   const onMapEvents = useMemo(
     () => ({
@@ -264,6 +325,8 @@ export default function Dashboard() {
     }),
     [selectedProvince, selectProvince, clearSelection, viewScope.level]
   );
+
+  const showMap = viewScope.level === 'country' || viewScope.level === 'province' || viewScope.level === 'city';
 
   const attendanceOption = useMemo(() => {
     if (viewMode === 'occupation') {
@@ -370,17 +433,17 @@ export default function Dashboard() {
 
     const legendData = [viewScope.name];
 
-    if (viewScope.level === 'city' && displayCityData.length > 0) {
-      const city = displayCityData[0];
-      if (city && city.trend?.length > 0) {
-        legendData.push(city.regionName);
+    if (viewScope.level === 'country' && displayCityData.length > 0 && selectedProvince) {
+      const province = filteredProvinceData.find((p) => p.regionCode === selectedProvince);
+      if (province && province.trend?.length > 0) {
+        legendData.push(province.regionName);
         series.push({
-          name: city.regionName,
+          name: province.regionName,
           type: 'line',
           smooth: true,
           symbol: 'circle',
           symbolSize: 8,
-          data: city.trend.map((t: any) => t.attendanceRate),
+          data: province.trend.map((t: any) => t.attendanceRate),
           lineStyle: { width: 3, color: '#10b981' },
           itemStyle: { color: '#10b981', borderWidth: 2, borderColor: '#fff' },
         });
@@ -679,7 +742,6 @@ export default function Dashboard() {
   };
 
   const renderProvinceView = () => {
-    const showMap = viewScope.level === 'country' || viewScope.level === 'province';
     const showCityList = viewScope.level === 'province' || 
                         (viewScope.level === 'country' && selectedProvince) ||
                         viewScope.level === 'city';
@@ -774,11 +836,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-center h-[520px]">
                 <div className="text-gray-500 text-sm">地图加载中...</div>
               </div>
-            ) : (
-              <div className="flex items-center justify-center h-[320px]">
-                <div className="text-gray-500 text-sm">机构级别暂无地图视图</div>
-              </div>
-            )}
+            ) : null}
             {showCityList && displayCityData.length > 0 && (
               <div className="border-t border-gray-100 px-6 py-4">
                 <div className="flex items-center justify-between mb-3">
@@ -824,7 +882,7 @@ export default function Dashboard() {
           <div>
             <RankingList 
               data={rankingData} 
-              title={viewScope.level === 'province' || viewScope.level === 'city' ? '合格率排名榜' : '合格率排名榜'} 
+              title={viewScope.level === 'province' || viewScope.level === 'city' ? `${viewScope.name}合格率排名榜` : '合格率排名榜'} 
               unit="%" 
             />
           </div>

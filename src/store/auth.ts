@@ -132,8 +132,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) return false;
     if (user.role === 'national') return true;
 
-    if (user.role === 'institution' && user.institutionId) {
+    if (user.role === 'institution' || user.role === 'academic') {
       return false;
+    }
+
+    if (user.role === 'province') {
+      return reportRegionCode === user.regionCode;
+    }
+
+    if (user.role === 'city') {
+      return reportRegionCode === user.regionCode;
     }
 
     return get().canAccessRegion(reportRegionCode);

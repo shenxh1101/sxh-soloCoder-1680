@@ -83,21 +83,6 @@ export default function Institutions() {
     }
 
     if (user.role === 'city') {
-      const region = regionHierarchy[user.regionCode];
-      if (region?.parent) {
-        return [
-          {
-            value: region.parent,
-            label: regionNameMap[region.parent] || region.parent,
-            children: [
-              {
-                value: user.regionCode,
-                label: regionNameMap[user.regionCode] || user.regionCode,
-              },
-            ],
-          },
-        ];
-      }
       return [
         {
           value: user.regionCode,
@@ -106,19 +91,14 @@ export default function Institutions() {
       ];
     }
 
-    if (user.role === 'institution') {
-      return [
-        {
-          value: user.regionCode,
-          label: regionNameMap[user.regionCode] || user.regionCode,
-        },
-      ];
+    if (user.role === 'institution' || user.role === 'academic') {
+      return [];
     }
 
     return buildRegionOptions('000000');
   }, [user]);
 
-  const showRegionFilter = user?.role !== 'institution';
+  const showRegionFilter = user?.role !== 'institution' && user?.role !== 'academic';
 
   const filteredData = useMemo(() => {
     return dataSource.filter((item) => {

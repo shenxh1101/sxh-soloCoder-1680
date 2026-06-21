@@ -35,13 +35,18 @@ const updateApprovalStatus = (warning: Warning): Warning => {
   } else if (currentStep > 3) {
     approvalStatus = 'province_approved';
   } else if (currentStep === 3) {
-    approvalStatus = 'district_approved';
+    const step3 = steps.find(s => s.step === 3);
+    if (step3?.status === 'completed') {
+      approvalStatus = 'province_approved';
+    } else {
+      approvalStatus = 'district_approved';
+    }
   } else if (currentStep === 2) {
     approvalStatus = 'institution_approved';
   }
-  
+
   const hasRectification = steps.some(s => s.title === '提交整改方案' && s.status === 'completed');
-  if (hasRectification && !hasRejected) {
+  if (hasRectification && !hasRejected && approvalStatus !== 'province_approved') {
     approvalStatus = 'rectification_submitted';
   }
 
@@ -106,12 +111,14 @@ export const useWarningStore = create<WarningState>((set, get) => ({
     const now = new Date();
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
+    const nextStep = step < 3 ? (step + 1) : 4;
+
     let updatedWarning: Warning = {
       ...currentWarning,
       status: step === 3 ? 'resolved' : 'processing',
       approvalFlow: {
         ...currentWarning.approvalFlow,
-        currentStep: (step as 0 | 1 | 2 | 3) + 1 > 3 ? 3 : ((step + 1) as 0 | 1 | 2 | 3),
+        currentStep: nextStep as 0 | 1 | 2 | 3 | 4,
         steps: currentWarning.approvalFlow.steps.map((s) =>
           s.step === step
             ? {

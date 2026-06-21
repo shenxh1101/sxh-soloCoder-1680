@@ -57,7 +57,7 @@ export interface ApprovalStep {
 export interface ApprovalFlow {
   id: string;
   warningId: string;
-  currentStep: 0 | 1 | 2 | 3;
+  currentStep: 0 | 1 | 2 | 3 | 4;
   steps: ApprovalStep[];
   finalDecision?: 'adjust_plan' | 'suspend_qualification' | 'dismiss';
 }
