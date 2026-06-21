@@ -5,6 +5,8 @@ import { SearchOutlined, SettingOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { useWarningStore } from '@/store/warning';
+import { useAuthStore } from '@/store/auth';
+import { regionNameMap } from '@/mock/data';
 import type { Warning } from '@/types';
 
 const warningTypeMap: Record<string, string> = {
@@ -12,22 +14,27 @@ const warningTypeMap: Record<string, string> = {
   employment_rate: '就业率预警',
 };
 
-const regionMap: Record<string, string> = {
-  '440100': '广州市',
-  '440300': '深圳市',
-  '440600': '佛山市',
-  '440000': '广东省',
-};
-
 const statusConfig: Record<string, { color: string; text: string }> = {
   pending: { color: 'orange', text: '待处理' },
   processing: { color: 'blue', text: '处理中' },
   resolved: { color: 'green', text: '已解决' },
+  rejected: { color: 'red', text: '已驳回' },
+  rectification: { color: 'purple', text: '整改中' },
+};
+
+const approvalStatusConfig: Record<string, { color: string; text: string }> = {
+  pending: { color: 'orange', text: '待审批' },
+  institution_approved: { color: 'blue', text: '机构已确认' },
+  district_approved: { color: 'cyan', text: '区级已复核' },
+  province_approved: { color: 'green', text: '省级已批准' },
+  rejected: { color: 'red', text: '已驳回' },
+  rectification_submitted: { color: 'purple', text: '整改方案已提交' },
 };
 
 export default function Warnings() {
   const navigate = useNavigate();
   const { warnings, fetchWarnings, loading } = useWarningStore();
+  const { filterWarnings, user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<string>('all');
   const [warningType, setWarningType] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState<string>('');
@@ -37,7 +44,8 @@ export default function Warnings() {
   }, [fetchWarnings]);
 
   const filteredWarnings = useMemo(() => {
-    return warnings.filter((w) => {
+    const permissionFiltered = filterWarnings(warnings);
+    return permissionFiltered.filter((w) => {
       const statusMatch = activeTab === 'all' || w.status === activeTab;
       const typeMatch = !warningType || w.type === warningType;
       const searchMatch =
@@ -46,7 +54,7 @@ export default function Warnings() {
         w.id.toLowerCase().includes(searchText.toLowerCase());
       return statusMatch && typeMatch && searchMatch;
     });
-  }, [warnings, activeTab, warningType, searchText]);
+  }, [warnings, activeTab, warningType, searchText, filterWarnings]);
 
   const columns: ColumnsType<Warning> = [
     {
@@ -79,7 +87,7 @@ export default function Warnings() {
       dataIndex: 'regionCode',
       key: 'regionCode',
       width: 100,
-      render: (code: string) => regionMap[code] || code,
+      render: (code: string) => regionNameMap[code] || code,
     },
     {
       title: '阈值',
@@ -119,6 +127,17 @@ export default function Warnings() {
       },
     },
     {
+      title: '审批进度',
+      dataIndex: 'approvalStatus',
+      key: 'approvalStatus',
+      width: 120,
+      align: 'center',
+      render: (status: string) => {
+        const config = approvalStatusConfig[status] || approvalStatusConfig.pending;
+        return <Tag color={config.color}>{config.text}</Tag>;
+      },
+    },
+    {
       title: '创建时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
@@ -143,20 +162,26 @@ export default function Warnings() {
     },
   ];
 
+  const permissionFilteredWarnings = filterWarnings(warnings);
   const tabItems = [
-    { key: 'all', label: `全部 (${warnings.length})` },
-    { key: 'pending', label: `待处理 (${warnings.filter((w) => w.status === 'pending').length})` },
-    { key: 'processing', label: `处理中 (${warnings.filter((w) => w.status === 'processing').length})` },
-    { key: 'resolved', label: `已解决 (${warnings.filter((w) => w.status === 'resolved').length})` },
+    { key: 'all', label: `全部 (${permissionFilteredWarnings.length})` },
+    { key: 'pending', label: `待处理 (${permissionFilteredWarnings.filter((w) => w.status === 'pending').length})` },
+    { key: 'processing', label: `处理中 (${permissionFilteredWarnings.filter((w) => w.status === 'processing').length})` },
+    { key: 'resolved', label: `已解决 (${permissionFilteredWarnings.filter((w) => w.status === 'resolved').length})` },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-[1600px] mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">预警中心</h1>
-            <p className="text-slate-400 text-sm">监控培训机构异常指标，及时预警处置</p>
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">预警中心</h1>
+            <p className="text-slate-500 text-sm">监控培训机构异常指标，及时预警处置</p>
+            {user && user.role !== 'national' && (
+              <p className="text-blue-600 text-xs mt-1">
+                当前数据范围：{regionNameMap[user.regionCode] || '全国'}
+              </p>
+            )}
           </div>
           <Space>
             <Button
@@ -170,7 +195,7 @@ export default function Warnings() {
         </div>
 
         <Card
-          className="mb-4 bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+          className="mb-4 bg-white border border-slate-200 shadow-sm"
           styles={{ body: { padding: '16px' } }}
         >
           <div className="flex flex-wrap items-center gap-4">
@@ -206,7 +231,7 @@ export default function Warnings() {
         </Card>
 
         <Card
-          className="bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+          className="bg-white border border-slate-200 shadow-sm"
           styles={{ body: { padding: 0 } }}
         >
           <Table
@@ -214,7 +239,7 @@ export default function Warnings() {
             dataSource={filteredWarnings}
             rowKey="id"
             loading={loading}
-            scroll={{ x: 1200 }}
+            scroll={{ x: 1400 }}
             pagination={{
               showSizeChanger: true,
               showQuickJumper: true,

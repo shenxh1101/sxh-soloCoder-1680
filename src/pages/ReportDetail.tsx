@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Breadcrumb,
   Button,
@@ -10,6 +10,7 @@ import {
   Col,
   Spin,
   message,
+  Alert,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -18,11 +19,14 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   FileTextOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import { useReportStore } from '@/store/report';
+import { useAuthStore } from '@/store/auth';
+import { regionNameMap } from '@/mock/data';
 import MetricsCard from '@/components/MetricsCard';
 import type { OptimizationSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
@@ -38,16 +42,32 @@ const categoryConfig: Record<string, { label: string; icon: string }> = {
   teacher: { label: '师资配置', icon: '👨‍🏫' },
 };
 
+const reportStatusConfig: Record<string, { color: string; text: string }> = {
+  generated: { color: 'green', text: '已生成' },
+  generating: { color: 'blue', text: '生成中' },
+  draft: { color: 'orange', text: '草稿' },
+};
+
 export default function ReportDetail() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
-  const { currentReport, fetchReportDetail, loading } = useReportStore();
+  const { currentReport, fetchReportDetail, loading, reports } = useReportStore();
+  const { filterReports, user } = useAuthStore();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (reportId) {
       fetchReportDetail(reportId);
     }
   }, [reportId, fetchReportDetail]);
+
+  useEffect(() => {
+    if (reports.length > 0 && currentReport) {
+      const accessibleReports = filterReports(reports);
+      const canAccess = accessibleReports.some((r) => r.id === currentReport.id);
+      setHasPermission(canAccess);
+    }
+  }, [reports, currentReport, filterReports]);
 
   const handleDownload = () => {
     message.success('PDF 下载已开始');
@@ -73,7 +93,7 @@ export default function ReportDetail() {
       },
       legend: {
         data: ['本周', '上周', '去年同期'],
-        textStyle: { color: '#94a3b8' },
+        textStyle: { color: '#64748b' },
         top: 0,
       },
       grid: {
@@ -87,15 +107,15 @@ export default function ReportDetail() {
         type: 'category',
         data: ['合格率', '就业率'],
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8' },
+        axisLabel: { color: '#64748b' },
       },
       yAxis: {
         type: 'value',
         min: 60,
         max: 100,
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.1)' } },
+        axisLabel: { color: '#64748b', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
       },
       series: [
         {
@@ -188,15 +208,15 @@ export default function ReportDetail() {
         boundaryGap: false,
         data: trendData.map((d) => d.week),
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', fontSize: 11, rotate: 30 },
+        axisLabel: { color: '#64748b', fontSize: 11, rotate: 30 },
       },
       yAxis: {
         type: 'value',
         min: 70,
         max: 95,
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.1)' } },
+        axisLabel: { color: '#64748b', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
       },
       series: [
         {
@@ -256,7 +276,7 @@ export default function ReportDetail() {
         orient: 'vertical',
         right: 20,
         top: 'center',
-        textStyle: { color: '#94a3b8' },
+        textStyle: { color: '#64748b' },
         icon: 'circle',
         itemWidth: 10,
         itemHeight: 10,
@@ -271,7 +291,7 @@ export default function ReportDetail() {
           avoidLabelOverlap: true,
           itemStyle: {
             borderRadius: 8,
-            borderColor: '#0f172a',
+            borderColor: '#fff',
             borderWidth: 3,
           },
           label: {
@@ -283,13 +303,13 @@ export default function ReportDetail() {
               show: true,
               fontSize: 18,
               fontWeight: 'bold',
-              color: '#f1f5f9',
+              color: '#1e293b',
               formatter: '{b}\n{c}%',
             },
             itemStyle: {
               shadowBlur: 20,
               shadowOffsetX: 0,
-              shadowColor: 'rgba(0, 0, 0, 0.5)',
+              shadowColor: 'rgba(0, 0, 0, 0.2)',
             },
           },
           labelLine: {
@@ -335,13 +355,13 @@ export default function ReportDetail() {
         type: 'category',
         data: distData.map((d) => d.occupation),
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', fontSize: 11 },
+        axisLabel: { color: '#64748b', fontSize: 11 },
       },
       yAxis: {
         type: 'value',
         axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', formatter: '{value} 天' },
-        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.1)' } },
+        axisLabel: { color: '#64748b', formatter: '{value} 天' },
+        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
       },
       series: [
         {
@@ -367,7 +387,7 @@ export default function ReportDetail() {
           label: {
             show: true,
             position: 'top',
-            color: '#f1f5f9',
+            color: '#475569',
             formatter: '{c} 天',
             fontSize: 12,
           },
@@ -383,23 +403,23 @@ export default function ReportDetail() {
     return (
       <List.Item
         key={item.id}
-        className="!border-white/5 !px-4 !py-4 hover:bg-white/5 transition-colors"
+        className="!border-slate-200 !px-4 !py-4 hover:bg-slate-50 transition-colors"
       >
         <List.Item.Meta
           avatar={
-            <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-xl">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-xl">
               {categoryCfg.icon}
             </div>
           }
           title={
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-white font-medium">{categoryCfg.label}</span>
+              <span className="text-slate-800 font-medium">{categoryCfg.label}</span>
               <Tag color={priorityCfg.color} style={{ margin: 0 }}>
                 {priorityCfg.text}
               </Tag>
             </div>
           }
-          description={<p className="text-slate-300 text-sm leading-relaxed m-0">{item.content}</p>}
+          description={<p className="text-slate-600 text-sm leading-relaxed m-0">{item.content}</p>}
         />
       </List.Item>
     );
@@ -417,8 +437,8 @@ export default function ReportDetail() {
       {
         key: '1',
         label: (
-          <span className="text-white font-medium">
-            <FileTextOutlined className="mr-2 text-blue-400" />
+          <span className="text-slate-800 font-medium">
+            <FileTextOutlined className="mr-2 text-blue-600" />
             培训效能总览
           </span>
         ),
@@ -468,9 +488,9 @@ export default function ReportDetail() {
             </Row>
 
             <Card
-              className="bg-slate-900/30 ring-1 ring-white/5 border-0"
+              className="bg-white border border-slate-200"
               title={
-                <span className="text-white font-medium">核心指标同比环比对比</span>
+                <span className="text-slate-800 font-medium">核心指标同比环比对比</span>
               }
             >
               <ReactECharts
@@ -479,8 +499,8 @@ export default function ReportDetail() {
                 opts={{ renderer: 'canvas' }}
               />
               {passRateSection?.analysis && (
-                <div className="mt-4 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                  <p className="text-blue-300 text-sm leading-relaxed">
+                <div className="mt-4 p-4 rounded-lg bg-blue-50 border border-blue-200">
+                  <p className="text-blue-800 text-sm leading-relaxed">
                     <span className="font-semibold">分析结论：</span>
                     {passRateSection.analysis}
                   </p>
@@ -493,16 +513,16 @@ export default function ReportDetail() {
       {
         key: '2',
         label: (
-          <span className="text-white font-medium">
-            <ArrowUpOutlined className="mr-2 text-emerald-400" />
+          <span className="text-slate-800 font-medium">
+            <ArrowUpOutlined className="mr-2 text-emerald-600" />
             合格率同比环比分析
           </span>
         ),
         children: (
           <Card
-            className="bg-slate-900/30 ring-1 ring-white/5 border-0"
+            className="bg-white border border-slate-200"
             title={
-              <span className="text-white font-medium">近12周合格率走势</span>
+              <span className="text-slate-800 font-medium">近12周合格率走势</span>
             }
           >
             <ReactECharts
@@ -511,8 +531,8 @@ export default function ReportDetail() {
               opts={{ renderer: 'canvas' }}
             />
             {trendSection?.analysis && (
-              <div className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <p className="text-emerald-300 text-sm leading-relaxed">
+              <div className="mt-4 p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                <p className="text-emerald-800 text-sm leading-relaxed">
                   <span className="font-semibold">趋势分析：</span>
                   {trendSection.analysis}
                 </p>
@@ -524,16 +544,16 @@ export default function ReportDetail() {
       {
         key: '3',
         label: (
-          <span className="text-white font-medium">
-            <ArrowUpOutlined className="mr-2 text-purple-400" />
+          <span className="text-slate-800 font-medium">
+            <ArrowUpOutlined className="mr-2 text-purple-600" />
             就业去向分布
           </span>
         ),
         children: (
           <Card
-            className="bg-slate-900/30 ring-1 ring-white/5 border-0"
+            className="bg-white border border-slate-200"
             title={
-              <span className="text-white font-medium">行业分布占比</span>
+              <span className="text-slate-800 font-medium">行业分布占比</span>
             }
           >
             <ReactECharts
@@ -542,8 +562,8 @@ export default function ReportDetail() {
               opts={{ renderer: 'canvas' }}
             />
             {empSection?.analysis && (
-              <div className="mt-4 p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                <p className="text-purple-300 text-sm leading-relaxed">
+              <div className="mt-4 p-4 rounded-lg bg-purple-50 border border-purple-200">
+                <p className="text-purple-800 text-sm leading-relaxed">
                   <span className="font-semibold">分布分析：</span>
                   {empSection.analysis}
                 </p>
@@ -555,16 +575,16 @@ export default function ReportDetail() {
       {
         key: '4',
         label: (
-          <span className="text-white font-medium">
-            <ArrowDownOutlined className="mr-2 text-orange-400" />
+          <span className="text-slate-800 font-medium">
+            <ArrowDownOutlined className="mr-2 text-orange-600" />
             证书获取周期分析
           </span>
         ),
         children: (
           <Card
-            className="bg-slate-900/30 ring-1 ring-white/5 border-0"
+            className="bg-white border border-slate-200"
             title={
-              <span className="text-white font-medium">各职业平均取证天数</span>
+              <span className="text-slate-800 font-medium">各职业平均取证天数</span>
             }
           >
             <ReactECharts
@@ -573,8 +593,8 @@ export default function ReportDetail() {
               opts={{ renderer: 'canvas' }}
             />
             {certSection?.analysis && (
-              <div className="mt-4 p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                <p className="text-orange-300 text-sm leading-relaxed">
+              <div className="mt-4 p-4 rounded-lg bg-orange-50 border border-orange-200">
+                <p className="text-orange-800 text-sm leading-relaxed">
                   <span className="font-semibold">周期分析：</span>
                   {certSection.analysis}
                 </p>
@@ -586,14 +606,14 @@ export default function ReportDetail() {
       {
         key: '5',
         label: (
-          <span className="text-white font-medium">
-            <FileTextOutlined className="mr-2 text-cyan-400" />
+          <span className="text-slate-800 font-medium">
+            <FileTextOutlined className="mr-2 text-cyan-600" />
             优化建议
           </span>
         ),
         children: (
           <Card
-            className="bg-slate-900/30 ring-1 ring-white/5 border-0"
+            className="bg-white border border-slate-200"
             styles={{ body: { padding: 0 } }}
           >
             <List
@@ -610,16 +630,31 @@ export default function ReportDetail() {
 
   if (loading && !currentReport) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (hasPermission === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="max-w-md text-center">
+          <LockOutlined className="text-6xl text-slate-400 mb-4" />
+          <h2 className="text-xl font-bold text-slate-800 mb-2">无权限访问</h2>
+          <p className="text-slate-500 mb-6">您没有权限查看该报告，请检查您的账号权限范围。</p>
+          <Button type="primary" onClick={() => navigate('/reports')} icon={<ArrowLeftOutlined />}>
+            返回报告列表
+          </Button>
+        </div>
       </div>
     );
   }
 
   if (!currentReport) {
     return (
-      <div className="min-h-screen bg-slate-950 p-6 flex items-center justify-center">
-        <div className="text-center text-slate-400">
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="text-center text-slate-500">
           <p className="mb-4 text-lg">未找到该报告</p>
           <Button type="primary" onClick={() => navigate('/reports')} icon={<ArrowLeftOutlined />}>
             返回报告列表
@@ -629,8 +664,10 @@ export default function ReportDetail() {
     );
   }
 
+  const statusCfg = reportStatusConfig[currentReport.status] || reportStatusConfig.generated;
+
   return (
-    <div className="min-h-screen bg-slate-950 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-[1400px] mx-auto">
         <div className="mb-6">
           <Breadcrumb
@@ -639,7 +676,7 @@ export default function ReportDetail() {
               {
                 title: (
                   <span
-                    className="cursor-pointer hover:text-white text-slate-400 transition-colors flex items-center gap-1"
+                    className="cursor-pointer hover:text-slate-800 text-slate-500 transition-colors flex items-center gap-1"
                     onClick={() => navigate('/')}
                   >
                     <HomeOutlined />
@@ -650,7 +687,7 @@ export default function ReportDetail() {
               {
                 title: (
                   <span
-                    className="cursor-pointer hover:text-white text-slate-400 transition-colors"
+                    className="cursor-pointer hover:text-slate-800 text-slate-500 transition-colors"
                     onClick={() => navigate('/reports')}
                   >
                     诊断报告
@@ -658,31 +695,40 @@ export default function ReportDetail() {
                 ),
               },
               {
-                title: <span className="text-white">报告详情</span>,
+                title: <span className="text-slate-800">报告详情</span>,
               },
             ]}
           />
+
+          {user && user.role !== 'national' && (
+            <Alert
+              message={`当前数据范围：${regionNameMap[user.regionCode] || '全国'}`}
+              type="info"
+              showIcon
+              className="mb-4"
+            />
+          )}
 
           <div className="flex items-center gap-4">
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/reports')}>
               返回列表
             </Button>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold text-white mb-1">
+              <h1 className="text-2xl font-bold text-slate-800 mb-1">
                 {currentReport.year}年第{currentReport.weekNumber}周 · {currentReport.regionName}培训效能诊断报告
               </h1>
               <div className="flex flex-wrap items-center gap-4 text-sm">
-                <span className="text-slate-400">
+                <span className="text-slate-500">
                   报告周期：{currentReport.weekStart} ~ {currentReport.weekEnd}
                 </span>
-                <span className="text-slate-400">
+                <span className="text-slate-500">
                   生成时间：{dayjs(currentReport.generatedAt).format('YYYY-MM-DD HH:mm:ss')}
                 </span>
                 <Tag
-                  color={currentReport.status === 'generated' ? 'green' : 'blue'}
+                  color={statusCfg.color}
                   style={{ margin: 0 }}
                 >
-                  {currentReport.status === 'generated' ? '已生成' : '生成中'}
+                  {statusCfg.text}
                 </Tag>
               </div>
             </div>
@@ -699,7 +745,7 @@ export default function ReportDetail() {
 
         <Card
           className={cn(
-            'bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0'
+            'bg-white border border-slate-200'
           )}
           styles={{ body: { padding: '24px' } }}
         >

@@ -11,12 +11,14 @@ import {
   Spin,
   Row,
   Col,
+  Modal,
 } from 'antd';
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   FileTextOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
@@ -27,6 +29,7 @@ import ApprovalTimeline from '@/components/ApprovalTimeline';
 import type { User } from '@/types';
 
 const { TextArea } = Input;
+const { confirm } = Modal;
 
 const warningTypeMap: Record<string, string> = {
   pass_rate: '合格率预警',
@@ -41,9 +44,9 @@ const regionMap: Record<string, string> = {
 };
 
 const statusConfig: Record<string, { color: string; text: string }> = {
-  pending: { color: 'orange', text: '待处理' },
-  processing: { color: 'blue', text: '处理中' },
-  resolved: { color: 'green', text: '已解决' },
+  pending: { color: 'warning', text: '待处理' },
+  processing: { color: 'processing', text: '处理中' },
+  resolved: { color: 'success', text: '已解决' },
 };
 
 const stepRoleMap: Record<number, User['role'][]> = {
@@ -55,10 +58,11 @@ const stepRoleMap: Record<number, User['role'][]> = {
 export default function WarningDetail() {
   const { warningId } = useParams<{ warningId: string }>();
   const navigate = useNavigate();
-  const { currentWarning, fetchWarningDetail, approveStep, loading } = useWarningStore();
+  const { currentWarning, fetchWarningDetail, approveStep, rejectStep, submitRectificationPlan, loading } = useWarningStore();
   const { user } = useAuthStore();
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [operationType, setOperationType] = useState<'approve' | 'reject' | 'plan' | null>(null);
 
   useEffect(() => {
     if (warningId) {
@@ -95,13 +99,13 @@ export default function WarningDetail() {
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        textStyle: { color: '#fff' },
+        backgroundColor: 'rgba(255, 255, 255, 0.98)',
+        borderColor: 'rgba(0, 0, 0, 0.1)',
+        textStyle: { color: '#1f2937' },
       },
       legend: {
         data: ['机构合格率', '区域均值', '预警阈值'],
-        textStyle: { color: '#94a3b8' },
+        textStyle: { color: '#6b7280' },
         top: 0,
       },
       grid: {
@@ -115,16 +119,16 @@ export default function WarningDetail() {
         type: 'category',
         boundaryGap: false,
         data: months,
-        axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8' },
+        axisLine: { lineStyle: { color: 'rgba(156, 163, 175, 0.5)' } },
+        axisLabel: { color: '#6b7280' },
       },
       yAxis: {
         type: 'value',
         min: 0,
         max: 100,
-        axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.3)' } },
-        axisLabel: { color: '#94a3b8', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.1)' } },
+        axisLine: { lineStyle: { color: 'rgba(156, 163, 175, 0.5)' } },
+        axisLabel: { color: '#6b7280', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(229, 231, 235, 0.8)' } },
       },
       series: [
         {
@@ -142,7 +146,7 @@ export default function WarningDetail() {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+                { offset: 0, color: 'rgba(59, 130, 246, 0.25)' },
                 { offset: 1, color: 'rgba(59, 130, 246, 0)' },
               ],
             },
@@ -177,35 +181,93 @@ export default function WarningDetail() {
     };
   }, [currentWarning]);
 
-  const handleSubmit = async (action: 'approve' | 'reject' | 'plan') => {
+  const showConfirm = (action: 'approve' | 'reject' | 'plan', comment: string) => {
+    const step = currentWarning?.approvalFlow.currentStep as 1 | 2 | 3;
+    if (!currentWarning) return;
+
+    let title = '';
+    let content = '';
+    let okText = '';
+    let okType: 'primary' | 'danger' | 'default' = 'primary';
+
+    if (action === 'approve') {
+      title = '确认通过';
+      content = `确认通过第 ${step} 步审批？此操作将推进到下一步。`;
+      okText = '确认通过';
+      okType = 'primary';
+    } else if (action === 'reject') {
+      title = '确认驳回';
+      content = '确认驳回此审批？驳回后将退回上一步重新处理，驳回意见将记录在时间线中。';
+      okText = '确认驳回';
+      okType = 'danger';
+    } else if (action === 'plan') {
+      title = '提交整改方案';
+      content = '确认提交此整改方案？提交后将继续审批流程。';
+      okText = '确认提交';
+      okType = 'primary';
+    }
+
+    confirm({
+      title,
+      icon: action === 'reject' ? <ExclamationCircleOutlined className="text-red-500" /> : <ExclamationCircleOutlined className="text-blue-500" />,
+      content: (
+        <div>
+          <p className="mb-3 text-gray-700">{content}</p>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500 mb-1">审批意见：</p>
+            <p className="text-gray-800 font-medium">{comment || '（未填写意见）'}</p>
+          </div>
+        </div>
+      ),
+      okText,
+      okType,
+      cancelText: '取消',
+      onOk: async () => {
+        await executeOperation(action, comment);
+      },
+    });
+  };
+
+  const executeOperation = async (action: 'approve' | 'reject' | 'plan', comment: string) => {
     try {
-      const values = await form.validateFields();
       setSubmitting(true);
+      setOperationType(action);
 
       if (!currentWarning) return;
       const step = currentWarning.approvalFlow.currentStep as 1 | 2 | 3;
-      const comment = values.comment || '';
 
       if (action === 'approve') {
         approveStep(step, comment);
-        message.success('审批通过成功');
+        message.success('审批通过，已推进到下一步');
       } else if (action === 'reject') {
-        message.success('已驳回');
+        rejectStep(step, comment);
+        message.success('已驳回，已退回上一步处理');
       } else if (action === 'plan') {
-        approveStep(step, `整改方案：${comment}`);
+        submitRectificationPlan(step, comment);
         message.success('整改方案已提交');
       }
 
       form.resetFields();
-    } catch {
     } finally {
-      setSubmitting(false);
+      setTimeout(() => {
+        setSubmitting(false);
+        setOperationType(null);
+      }, 500);
+    }
+  };
+
+  const handleSubmit = async (action: 'approve' | 'reject' | 'plan') => {
+    try {
+      const values = await form.validateFields();
+      showConfirm(action, values.comment || '');
+    } catch {
+      // Validation failed
     }
   };
 
   if (loading && !currentWarning) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Spin size="large" />
       </div>
     );
@@ -213,8 +275,8 @@ export default function WarningDetail() {
 
   if (!currentWarning) {
     return (
-      <div className="min-h-screen bg-slate-950 p-6 flex items-center justify-center">
-        <div className="text-center text-slate-400">
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="text-center text-gray-500">
           <p className="mb-4">未找到该预警记录</p>
           <Button onClick={() => navigate('/warnings')} icon={<ArrowLeftOutlined />}>
             返回列表
@@ -225,9 +287,10 @@ export default function WarningDetail() {
   }
 
   const statusCfg = statusConfig[currentWarning.status] || statusConfig.pending;
+  const currentStepData = currentWarning.approvalFlow.steps[currentWarning.approvalFlow.currentStep - 1];
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6">
+    <div className="p-6 bg-gray-50 min-h-screen">
       <div className="max-w-[1400px] mx-auto">
         <div className="flex items-center gap-4 mb-6">
           <Button
@@ -237,8 +300,8 @@ export default function WarningDetail() {
             返回列表
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-white">预警详情</h1>
-            <p className="text-slate-400 text-sm">预警编号：{currentWarning.id}</p>
+            <h1 className="text-2xl font-bold text-gray-900">预警详情</h1>
+            <p className="text-gray-500 text-sm">预警编号：{currentWarning.id}</p>
           </div>
           <Tag color={statusCfg.color} style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 14 }}>
             {statusCfg.text}
@@ -246,29 +309,29 @@ export default function WarningDetail() {
         </div>
 
         <Card
-          className="mb-6 bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+          className="mb-6 shadow-sm"
           title={
-            <span className="text-white font-semibold">预警基本信息</span>
+            <span className="text-gray-900 font-semibold">预警基本信息</span>
           }
         >
           <Descriptions
             column={2}
-            labelStyle={{ color: '#94a3b8', width: 120 }}
-            contentStyle={{ color: '#fff' }}
+            labelStyle={{ color: '#6b7280', width: 120, fontWeight: 500 }}
+            contentStyle={{ color: '#1f2937' }}
           >
             <Descriptions.Item label="预警类型">
-              <Tag color={currentWarning.type === 'pass_rate' ? 'red' : 'purple'}>
+              <Tag color={currentWarning.type === 'pass_rate' ? 'error' : 'purple'}>
                 {warningTypeMap[currentWarning.type] || currentWarning.type}
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="机构名称">
-              {currentWarning.institutionName}
+              <span className="font-medium">{currentWarning.institutionName}</span>
             </Descriptions.Item>
             <Descriptions.Item label="所属地区">
               {regionMap[currentWarning.regionCode] || currentWarning.regionCode}
             </Descriptions.Item>
             <Descriptions.Item label="连续异常月份">
-              <span className="text-orange-400 font-semibold">
+              <span className="text-orange-600 font-semibold">
                 {currentWarning.consecutiveMonths} 个月
               </span>
             </Descriptions.Item>
@@ -276,7 +339,7 @@ export default function WarningDetail() {
               {currentWarning.threshold}%
             </Descriptions.Item>
             <Descriptions.Item label="实际值">
-              <span className="text-red-500 font-semibold">
+              <span className="text-red-600 font-semibold">
                 {currentWarning.actualValue}%
               </span>
             </Descriptions.Item>
@@ -287,16 +350,17 @@ export default function WarningDetail() {
               {dayjs(currentWarning.createdAt).format('YYYY-MM-DD HH:mm:ss')}
             </Descriptions.Item>
             <Descriptions.Item label="详细描述" span={2}>
-              <p className="text-slate-200">{currentWarning.description}</p>
+              <p className="text-gray-700">{currentWarning.description}</p>
             </Descriptions.Item>
           </Descriptions>
         </Card>
 
         <Card
-          className="mb-6 bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+          className="mb-6 shadow-sm"
           title={
-            <span className="text-white font-semibold">审批流程</span>
+            <span className="text-gray-900 font-semibold">审批流程</span>
           }
+          styles={{ body: { padding: '24px' } }}
         >
           <ApprovalTimeline
             steps={currentWarning.approvalFlow.steps}
@@ -307,47 +371,61 @@ export default function WarningDetail() {
         <Row gutter={24}>
           <Col xs={24} lg={12}>
             <Card
-              className="mb-6 bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+              className="mb-6 shadow-sm"
               title={
-                <span className="text-white font-semibold">审批工作台</span>
+                <span className="text-gray-900 font-semibold">审批工作台</span>
               }
             >
               {isCompleted ? (
                 <div className="text-center py-8">
                   <CheckCircleOutlined className="text-5xl text-green-500 mb-4" />
-                  <p className="text-green-400 text-lg">该预警已完成审批流程</p>
+                  <p className="text-green-600 text-lg font-medium">该预警已完成审批流程</p>
+                  {currentWarning.approvalFlow.finalDecision && (
+                    <p className="text-gray-500 mt-2">
+                      最终决定：
+                      {currentWarning.approvalFlow.finalDecision === 'adjust_plan' && '调整培训计划'}
+                      {currentWarning.approvalFlow.finalDecision === 'suspend_qualification' && '暂停培训资质'}
+                      {currentWarning.approvalFlow.finalDecision === 'dismiss' && '驳回预警'}
+                    </p>
+                  )}
                 </div>
               ) : !canOperate ? (
                 <div className="text-center py-8">
-                  <CloseCircleOutlined className="text-5xl text-slate-600 mb-4" />
-                  <p className="text-slate-400">当前步骤无需您审批</p>
-                  <p className="text-slate-500 text-sm mt-2">
-                    当前步骤：{currentWarning.approvalFlow.steps[currentWarning.approvalFlow.currentStep - 1]?.title || '-'}
+                  <CloseCircleOutlined className="text-5xl text-gray-300 mb-4" />
+                  <p className="text-gray-500">当前步骤无需您审批</p>
+                  <p className="text-gray-400 text-sm mt-2">
+                    当前步骤：{currentStepData?.title || '-'}
+                  </p>
+                  <p className="text-gray-400 text-sm">
+                    待处理角色：
+                    {currentStepData?.role === 'institution' && '机构负责人'}
+                    {currentStepData?.role === 'city' && '市级管理员'}
+                    {currentStepData?.role === 'province' && '省级管理员'}
+                    {currentStepData?.role === 'academic' && '专家委员会'}
                   </p>
                 </div>
               ) : (
                 <Form form={form} layout="vertical">
-                  <div className="mb-4 p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
-                    <p className="text-blue-300 text-sm">
+                  <div className="mb-4 p-4 rounded-lg bg-blue-50 border border-blue-200">
+                    <p className="text-blue-700 text-sm">
                       当前审批步骤：
                       <span className="font-semibold ml-1">
-                        {currentWarning.approvalFlow.steps[currentWarning.approvalFlow.currentStep - 1]?.title}
+                        {currentStepData?.title}
                       </span>
+                    </p>
+                    <p className="text-blue-600 text-xs mt-1">
+                      您的角色：{user?.role === 'institution' ? '机构负责人' : user?.role === 'city' ? '市级管理员' : user?.role === 'province' ? '省级管理员' : '专家委员会'}
                     </p>
                   </div>
                   <Form.Item
                     name="comment"
-                    label={<span className="text-slate-300">审批意见</span>}
+                    label={<span className="text-gray-700 font-medium">审批意见</span>}
                     rules={[{ required: true, message: '请输入审批意见' }]}
                   >
                     <TextArea
                       rows={4}
                       placeholder="请输入您的审批意见..."
-                      style={{
-                        backgroundColor: 'rgba(15, 23, 42, 0.5)',
-                        borderColor: 'rgba(148, 163, 184, 0.2)',
-                        color: '#fff',
-                      }}
+                      className="!bg-white"
                     />
                   </Form.Item>
                   <Form.Item>
@@ -355,7 +433,7 @@ export default function WarningDetail() {
                       <Button
                         type="primary"
                         icon={<CheckCircleOutlined />}
-                        loading={submitting}
+                        loading={submitting && operationType === 'approve'}
                         onClick={() => handleSubmit('approve')}
                       >
                         通过
@@ -363,7 +441,7 @@ export default function WarningDetail() {
                       <Button
                         danger
                         icon={<CloseCircleOutlined />}
-                        loading={submitting}
+                        loading={submitting && operationType === 'reject'}
                         onClick={() => handleSubmit('reject')}
                       >
                         驳回
@@ -371,7 +449,7 @@ export default function WarningDetail() {
                       {currentWarning.approvalFlow.currentStep === 1 && (
                         <Button
                           icon={<FileTextOutlined />}
-                          loading={submitting}
+                          loading={submitting && operationType === 'plan'}
                           onClick={() => handleSubmit('plan')}
                         >
                           提交整改方案
@@ -386,9 +464,9 @@ export default function WarningDetail() {
 
           <Col xs={24} lg={12}>
             <Card
-              className="mb-6 bg-slate-900/50 backdrop-blur-xl ring-1 ring-white/10 border-0"
+              className="mb-6 shadow-sm"
               title={
-                <span className="text-white font-semibold">近6个月合格率趋势</span>
+                <span className="text-gray-900 font-semibold">近6个月合格率趋势</span>
               }
             >
               <ReactECharts

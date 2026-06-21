@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   Table,
   Tag,
@@ -21,7 +21,8 @@ import {
   PlayCircleOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons';
-import { institutions as mockInstitutions } from '@/mock/data';
+import { institutions as mockInstitutions, regionHierarchy, regionNameMap } from '@/mock/data';
+import { useAuthStore } from '@/store/auth';
 import type { Institution } from '@/types';
 
 const levelConfig: Record<string, { color: string; text: string }> = {
@@ -36,57 +37,49 @@ const statusConfig: Record<string, { color: string; text: string }> = {
   pending: { color: 'default', text: '待审核' },
 };
 
-const regionOptions: any[] = [
-  {
-    value: '440000',
-    label: '广东省',
-    children: [
-      { value: '440100', label: '广州市' },
-      { value: '440300', label: '深圳市' },
-      { value: '440400', label: '珠海市' },
-      { value: '440600', label: '佛山市' },
-      { value: '440700', label: '江门市' },
-      { value: '441300', label: '惠州市' },
-      { value: '441900', label: '东莞市' },
-      { value: '442000', label: '中山市' },
-    ],
-  },
-  {
-    value: '110000',
-    label: '北京市',
-    children: [{ value: '110100', label: '朝阳区' }],
-  },
-  {
-    value: '310000',
-    label: '上海市',
-    children: [{ value: '310100', label: '浦东新区' }],
-  },
-];
+const buildRegionOptions = (regionCode: string, depth: number = 0): any[] => {
+  const region = regionHierarchy[regionCode];
+  if (!region || !region.children || region.children.length === 0 || depth >= 2) {
+    return [];
+  }
+  return region.children.map((code) => ({
+    value: code,
+    label: regionNameMap[code] || code,
+    children: buildRegionOptions(code, depth + 1),
+  }));
+};
 
-const regionMap: Record<string, string> = {
-  '440000': '广东省',
-  '440100': '广州市',
-  '440300': '深圳市',
-  '440400': '珠海市',
-  '440600': '佛山市',
-  '440700': '江门市',
-  '441300': '惠州市',
-  '441900': '东莞市',
-  '442000': '中山市',
-  '110000': '北京市',
-  '110100': '朝阳区',
-  '310000': '上海市',
-  '310100': '浦东新区',
+const getRegionOptions = () => {
+  const { user, getAccessibleRegions } = useAuthStore.getState();
+  if (!user || user.role === 'national') {
+    return buildRegionOptions('000000');
+  }
+  const accessible = getAccessibleRegions();
+  return accessible
+    .filter((code) => regionHierarchy[code]?.children?.length)
+    .map((code) => ({
+      value: code,
+      label: regionNameMap[code] || code,
+      children: buildRegionOptions(code, 1),
+    }));
 };
 
 export default function Institutions() {
-  const [dataSource, setDataSource] = useState<Institution[]>(mockInstitutions);
+  const { filterInstitutions, user, getAccessibleRegions } = useAuthStore();
+  const [dataSource, setDataSource] = useState<Institution[]>([]);
   const [regionValue, setRegionValue] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [levelFilter, setLevelFilter] = useState<string | undefined>(undefined);
   const [searchText, setSearchText] = useState<string>('');
   const [detailVisible, setDetailVisible] = useState(false);
   const [currentInstitution, setCurrentInstitution] = useState<Institution | null>(null);
+
+  useEffect(() => {
+    const filtered = filterInstitutions(mockInstitutions);
+    setDataSource(filtered);
+  }, [filterInstitutions]);
+
+  const regionOptions = useMemo(() => getRegionOptions(), []);
 
   const filteredData = useMemo(() => {
     return dataSource.filter((item) => {
@@ -147,7 +140,7 @@ export default function Institutions() {
       dataIndex: 'regionCode',
       key: 'regionCode',
       width: 120,
-      render: (code: string) => regionMap[code] || code,
+      render: (code: string) => regionNameMap[code] || code,
     },
     {
       title: '培训等级',
@@ -271,12 +264,18 @@ export default function Institutions() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800 font-serif">机构管理</h1>
-          <p className="text-sm text-slate-500 mt-0.5">管理培训机构资质，维护培训组织信息</p>
-        </div>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-[1600px] mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-slate-800 font-serif">机构管理</h1>
+            <p className="text-sm text-slate-500 mt-0.5">管理培训机构资质，维护培训组织信息</p>
+            {user && user.role !== 'national' && (
+              <p className="text-blue-600 text-xs mt-1">
+                当前数据范围：{regionNameMap[user.regionCode] || '全国'}
+              </p>
+            )}
+          </div>
           <Space>
             <Button
               type="primary"
@@ -288,7 +287,7 @@ export default function Institutions() {
           </Space>
         </div>
 
-        <Card className="card-base mb-4" styles={{ body: { padding: '16px' } }}>
+        <Card className="bg-white border border-slate-200 shadow-sm mb-4" styles={{ body: { padding: '16px' } }}>
           <div className="flex flex-wrap items-center gap-4">
             <Cascader
               options={regionOptions}
@@ -335,7 +334,7 @@ export default function Institutions() {
           </div>
         </Card>
 
-        <Card className="card-base" styles={{ body: { padding: 0 } }}>
+        <Card className="bg-white border border-slate-200 shadow-sm" styles={{ body: { padding: 0 } }}>
           <Table
             columns={columns}
             dataSource={filteredData}
@@ -377,7 +376,7 @@ export default function Institutions() {
                 <div>
                   <div className="text-slate-500 text-sm mb-1">所属地区</div>
                   <div className="text-slate-800">
-                    {regionMap[currentInstitution.regionCode] || currentInstitution.regionCode}
+                    {regionNameMap[currentInstitution.regionCode] || currentInstitution.regionCode}
                   </div>
                 </div>
                 <div>
@@ -438,6 +437,7 @@ export default function Institutions() {
             </div>
           )}
         </Modal>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { User } from '../types';
-import { mockUsers } from '../mock/data';
+import type { User, RegionData, Warning, WeeklyReport, Institution } from '../types';
+import { mockUsers, regionHierarchy } from '../mock/data';
 
 interface AuthState {
   user: User | null;
@@ -8,11 +8,17 @@ interface AuthState {
   login: (username: string, password: string) => boolean;
   logout: () => void;
   checkAuth: () => void;
+  getAccessibleRegions: () => string[];
+  getRegionFilter: <T extends { regionCode?: string; provinceCode?: string; cityCode?: string }>(data: T[]) => T[];
+  filterProvinces: (provinces: RegionData[]) => RegionData[];
+  filterWarnings: (warnings: Warning[]) => Warning[];
+  filterReports: (reports: WeeklyReport[]) => WeeklyReport[];
+  filterInstitutions: (institutions: Institution[]) => Institution[];
 }
 
 const STORAGE_KEY = 'auth_user';
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isLoggedIn: false,
 
@@ -41,5 +47,68 @@ export const useAuthStore = create<AuthState>((set) => ({
         localStorage.removeItem(STORAGE_KEY);
       }
     }
+  },
+
+  getAccessibleRegions: () => {
+    const { user } = get();
+    if (!user) return ['000000'];
+
+    if (user.role === 'national') {
+      return ['000000', ...regionHierarchy['000000'].children];
+    }
+
+    const region = regionHierarchy[user.regionCode];
+    if (!region) return [user.regionCode];
+
+    if (user.role === 'province') {
+      return [user.regionCode, ...region.children];
+    }
+
+    return [user.regionCode];
+  },
+
+  getRegionFilter: <T extends { regionCode?: string; provinceCode?: string; cityCode?: string }>(data: T[]) => {
+    const { user } = get();
+    if (!user) return data;
+
+    if (user.role === 'national') return data;
+
+    if (user.role === 'institution' && user.institutionId) {
+      return data.filter((d: any) => d.institutionId === user.institutionId);
+    }
+
+    const accessibleRegions = get().getAccessibleRegions();
+    return data.filter((d) => {
+      const code = d.regionCode || d.provinceCode || d.cityCode;
+      return code && accessibleRegions.includes(code);
+    });
+  },
+
+  filterProvinces: (provinces: RegionData[]) => {
+    const { user } = get();
+    if (!user || user.role === 'national') return provinces;
+
+    if (user.role === 'province') {
+      return provinces.filter((p) => p.regionCode === user.regionCode);
+    }
+    if (user.role === 'city') {
+      const region = regionHierarchy[user.regionCode];
+      if (region) {
+        return provinces.filter((p) => p.regionCode === region.parent);
+      }
+    }
+    return provinces;
+  },
+
+  filterWarnings: (warnings: Warning[]) => {
+    return get().getRegionFilter<Warning>(warnings);
+  },
+
+  filterReports: (reports: WeeklyReport[]) => {
+    return get().getRegionFilter<WeeklyReport>(reports);
+  },
+
+  filterInstitutions: (institutions: Institution[]) => {
+    return get().getRegionFilter<Institution>(institutions);
   },
 }));

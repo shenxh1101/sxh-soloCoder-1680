@@ -1,4 +1,4 @@
-import type { User, RegionData, Warning, WeeklyReport, Institution, OptimizationSuggestion, PlanValidationResult } from '../types';
+import type { User, RegionData, Warning, WeeklyReport, Institution, OptimizationSuggestion, PlanValidationResult, NationalStandard, OccupationData, OccupationCategory } from '../types';
 
 export const mockUsers: User[] = [
   {
@@ -203,6 +203,7 @@ export const mockWarnings: Warning[] = [
     actualValue: 58.2,
     consecutiveMonths: 3,
     status: 'pending',
+    approvalStatus: 'pending',
     createdAt: '2026-06-20T09:00:00Z',
     approvalFlow: {
       id: 'FLOW001',
@@ -245,6 +246,7 @@ export const mockWarnings: Warning[] = [
     actualValue: 55.8,
     consecutiveMonths: 3,
     status: 'processing',
+    approvalStatus: 'institution_approved',
     createdAt: '2026-06-18T14:30:00Z',
     approvalFlow: {
       id: 'FLOW002',
@@ -293,6 +295,7 @@ export const mockWarnings: Warning[] = [
     actualValue: 48.5,
     consecutiveMonths: 4,
     status: 'resolved',
+    approvalStatus: 'province_approved',
     createdAt: '2026-05-15T08:00:00Z',
     approvalFlow: {
       id: 'FLOW003',
@@ -350,7 +353,10 @@ export const planValidationResults: PlanValidationResult[] = [
     fileName: '2026年第三季度培训计划.xlsx',
     uploadedBy: '李主任',
     uploadedAt: '2026-06-22T09:30:00Z',
+    regionCode: '440100',
+    regionName: '广州市',
     totalCourses: 28,
+    validatedCourses: 28,
     abnormalItems: [
       {
         courseName: '高级电工技能培训',
@@ -390,13 +396,22 @@ export const planValidationResults: PlanValidationResult[] = [
       },
     ],
     overallStatus: 'error',
+    validationSummary: {
+      totalCourses: 28,
+      hoursPassed: 27,
+      teachersPassed: 27,
+      curriculumPassed: 27,
+    },
   },
   {
     id: 'PV20260621002',
     fileName: '职业技能提升计划-Q3.xlsx',
     uploadedBy: '王科长',
     uploadedAt: '2026-06-21T14:20:00Z',
+    regionCode: '440300',
+    regionName: '深圳市',
     totalCourses: 35,
+    validatedCourses: 35,
     abnormalItems: [
       {
         courseName: '育婴师职业资格培训',
@@ -418,13 +433,22 @@ export const planValidationResults: PlanValidationResult[] = [
       },
     ],
     overallStatus: 'warning',
+    validationSummary: {
+      totalCourses: 35,
+      hoursPassed: 34,
+      teachersPassed: 34,
+      curriculumPassed: 35,
+    },
   },
   {
     id: 'PV20260620003',
     fileName: '2026年度下半年培训规划.xlsx',
     uploadedBy: '张院长',
     uploadedAt: '2026-06-20T10:45:00Z',
+    regionCode: '440000',
+    regionName: '广东省',
     totalCourses: 42,
+    validatedCourses: 42,
     abnormalItems: [
       {
         courseName: '汽车维修基础班',
@@ -437,22 +461,40 @@ export const planValidationResults: PlanValidationResult[] = [
       },
     ],
     overallStatus: 'pass',
+    validationSummary: {
+      totalCourses: 42,
+      hoursPassed: 42,
+      teachersPassed: 42,
+      curriculumPassed: 41,
+    },
   },
   {
     id: 'PV20260619004',
     fileName: '新员工入职培训方案.xlsx',
     uploadedBy: '陈教务',
     uploadedAt: '2026-06-19T16:00:00Z',
+    regionCode: '310000',
+    regionName: '上海市',
     totalCourses: 15,
+    validatedCourses: 15,
     abnormalItems: [],
     overallStatus: 'pass',
+    validationSummary: {
+      totalCourses: 15,
+      hoursPassed: 15,
+      teachersPassed: 15,
+      curriculumPassed: 15,
+    },
   },
   {
     id: 'PV20260618005',
     fileName: '技能大赛赛前集训计划.xlsx',
     uploadedBy: '刘老师',
     uploadedAt: '2026-06-18T11:15:00Z',
+    regionCode: '110000',
+    regionName: '北京市',
     totalCourses: 22,
+    validatedCourses: 22,
     abnormalItems: [
       {
         courseName: '数控加工精密操作',
@@ -483,6 +525,12 @@ export const planValidationResults: PlanValidationResult[] = [
       },
     ],
     overallStatus: 'error',
+    validationSummary: {
+      totalCourses: 22,
+      hoursPassed: 21,
+      teachersPassed: 21,
+      curriculumPassed: 21,
+    },
   },
 ];
 
@@ -551,18 +599,74 @@ const generate12WeekPassRate = (base: number) => {
   return data;
 };
 
-const generateWeeklyReport = (
+export function generateWeeklyReport(
+  regionCode: string,
+  weekNumber: number,
+  year: number
+): WeeklyReport;
+export function generateWeeklyReport(
   id: string,
   year: number,
   weekNumber: number,
   regionCode: string,
   regionName: string,
-  status: 'generated' | 'generating',
+  status: 'generated' | 'generating' | 'draft',
   passRate: number,
   employmentRate: number,
   yoy: number,
   wow: number
-): WeeklyReport => {
+): WeeklyReport;
+export function generateWeeklyReport(
+  idOrRegionCode: string,
+  yearOrWeekNumber: number,
+  weekNumberOrYear: number,
+  pRegionCode?: string,
+  pRegionName?: string,
+  pStatus?: 'generated' | 'generating' | 'draft',
+  pPassRate?: number,
+  pEmploymentRate?: number,
+  pYoy?: number,
+  pWow?: number
+): WeeklyReport {
+  let id: string;
+  let year: number;
+  let weekNumber: number;
+  let actualRegionCode: string;
+  let actualRegionName: string;
+  let actualStatus: 'generated' | 'generating' | 'draft';
+  let actualPassRate: number;
+  let actualEmploymentRate: number;
+  let actualYoy: number;
+  let actualWow: number;
+
+  if (pRegionCode === undefined) {
+    actualRegionCode = idOrRegionCode;
+    weekNumber = yearOrWeekNumber;
+    year = weekNumberOrYear;
+    id = `REPORT${year}W${weekNumber.toString().padStart(2, '0')}${actualRegionCode}`;
+    actualRegionName = regionNameMap[actualRegionCode] || '未知地区';
+    actualStatus = 'draft';
+    actualPassRate = 75 + Math.random() * 15;
+    actualEmploymentRate = 70 + Math.random() * 15;
+    actualYoy = Math.random() * 6 - 2;
+    actualWow = Math.random() * 4 - 1;
+  } else {
+    id = idOrRegionCode;
+    year = yearOrWeekNumber;
+    weekNumber = weekNumberOrYear;
+    actualRegionCode = pRegionCode;
+    actualRegionName = pRegionName!;
+    actualStatus = pStatus!;
+    actualPassRate = pPassRate!;
+    actualEmploymentRate = pEmploymentRate!;
+    actualYoy = pYoy!;
+    actualWow = pWow!;
+  }
+
+  const passRate = Math.round(actualPassRate * 10) / 10;
+  const employmentRate = Math.round(actualEmploymentRate * 10) / 10;
+  const yoy = Math.round(actualYoy * 10) / 10;
+  const wow = Math.round(actualWow * 10) / 10;
   const baseDate = new Date(year, 0, 1);
   const weekStart = new Date(baseDate);
   weekStart.setDate(baseDate.getDate() + (weekNumber - 1) * 7);
@@ -581,9 +685,9 @@ const generateWeeklyReport = (
     weekEnd: formatDate(weekEnd),
     year,
     weekNumber,
-    regionCode,
-    regionName,
-    status,
+    regionCode: actualRegionCode,
+    regionName: actualRegionName,
+    status: actualStatus,
     generatedAt: generatedDate.toISOString(),
     metrics: {
       passRate,
@@ -873,3 +977,338 @@ export const institutions: Institution[] = [
     },
   },
 ];
+
+export const nationalStandards: NationalStandard[] = [
+  {
+    id: 'STD001',
+    occupation: 'electrician',
+    occupationName: '电工',
+    level: 'primary',
+    requiredHours: 120,
+    requiredTeachers: '中级技师及以上',
+    requiredCourses: ['电工基础', '安全用电', '电气识图', '照明电路安装', '低压电器维修'],
+  },
+  {
+    id: 'STD002',
+    occupation: 'electrician',
+    occupationName: '电工',
+    level: 'intermediate',
+    requiredHours: 180,
+    requiredTeachers: '高级技师',
+    requiredCourses: ['电工基础', '电子技术', '电机与变压器', '电力拖动', 'PLC编程基础', '电气故障诊断'],
+  },
+  {
+    id: 'STD003',
+    occupation: 'electrician',
+    occupationName: '电工',
+    level: 'advanced',
+    requiredHours: 240,
+    requiredTeachers: '高级技师或工程师',
+    requiredCourses: ['高级电工技术', '自动控制原理', '变频器应用', '工业机器人基础', '电气系统设计', '新能源电气'],
+  },
+  {
+    id: 'STD004',
+    occupation: 'welder',
+    occupationName: '焊工',
+    level: 'primary',
+    requiredHours: 100,
+    requiredTeachers: '中级焊工及以上',
+    requiredCourses: ['焊接安全', '焊接材料', '手工电弧焊基础', '气焊气割', '焊接质量检验'],
+  },
+  {
+    id: 'STD005',
+    occupation: 'welder',
+    occupationName: '焊工',
+    level: 'intermediate',
+    requiredHours: 160,
+    requiredTeachers: '高级焊工',
+    requiredCourses: ['焊接冶金基础', '氩弧焊', '二氧化碳气体保护焊', '焊接应力变形', '无损检测基础'],
+  },
+  {
+    id: 'STD006',
+    occupation: 'welder',
+    occupationName: '焊工',
+    level: 'advanced',
+    requiredHours: 220,
+    requiredTeachers: '高级技师或焊接工程师',
+    requiredCourses: ['特种焊接技术', '焊接工艺设计', '压力管道焊接', '机器人焊接', '焊接质量控制'],
+  },
+  {
+    id: 'STD007',
+    occupation: 'housekeeping',
+    occupationName: '家政服务',
+    level: 'primary',
+    requiredHours: 80,
+    requiredTeachers: '高级家政师及以上',
+    requiredCourses: ['职业道德', '家居保洁', '衣物洗涤熨烫', '家用电器使用', '家庭饮食基础'],
+  },
+  {
+    id: 'STD008',
+    occupation: 'housekeeping',
+    occupationName: '家政服务',
+    level: 'intermediate',
+    requiredHours: 120,
+    requiredTeachers: '高级家政师',
+    requiredCourses: ['家居美化', '家庭厨艺', '衣物保养', '老年陪护基础', '家庭管理'],
+  },
+  {
+    id: 'STD009',
+    occupation: 'nursery',
+    occupationName: '育婴师',
+    level: 'primary',
+    requiredHours: 100,
+    requiredTeachers: '高级育婴师及以上',
+    requiredCourses: ['婴幼儿生理发育', '婴幼儿喂养', '婴幼儿护理', '婴幼儿安全防护', '婴幼儿启蒙教育'],
+  },
+  {
+    id: 'STD010',
+    occupation: 'nursery',
+    occupationName: '育婴师',
+    level: 'intermediate',
+    requiredHours: 150,
+    requiredTeachers: '高级育婴师或儿科护士',
+    requiredCourses: ['婴幼儿营养配餐', '婴幼儿常见病护理', '早期智力开发', '婴幼儿行为培养', '亲子游戏设计'],
+  },
+  {
+    id: 'STD011',
+    occupation: 'it',
+    occupationName: 'IT技术',
+    level: 'primary',
+    requiredHours: 160,
+    requiredTeachers: '中级工程师及以上',
+    requiredCourses: ['计算机基础', '操作系统', '办公软件', '计算机网络基础', '信息安全基础'],
+  },
+  {
+    id: 'STD012',
+    occupation: 'it',
+    occupationName: 'IT技术',
+    level: 'intermediate',
+    requiredHours: 240,
+    requiredTeachers: '高级工程师',
+    requiredCourses: ['编程语言基础(Python/Java)', '数据库基础', 'Web前端开发', '软件测试', '项目管理基础'],
+  },
+  {
+    id: 'STD013',
+    occupation: 'it',
+    occupationName: 'IT技术',
+    level: 'advanced',
+    requiredHours: 320,
+    requiredTeachers: '高级工程师或架构师',
+    requiredCourses: ['微服务架构', '云原生技术', '大数据基础', '人工智能应用', '信息安全管理'],
+  },
+  {
+    id: 'STD014',
+    occupation: 'auto_repair',
+    occupationName: '汽车维修',
+    level: 'primary',
+    requiredHours: 120,
+    requiredTeachers: '中级汽修技师及以上',
+    requiredCourses: ['汽车构造', '汽车电器基础', '汽车保养', '发动机维护', '底盘维修基础'],
+  },
+  {
+    id: 'STD015',
+    occupation: 'auto_repair',
+    occupationName: '汽车维修',
+    level: 'intermediate',
+    requiredHours: 180,
+    requiredTeachers: '高级汽修技师',
+    requiredCourses: ['发动机电控', '汽车底盘电控', '自动变速器维修', '汽车空调维修', '汽车故障诊断'],
+  },
+  {
+    id: 'STD016',
+    occupation: 'chef',
+    occupationName: '中式烹调师',
+    level: 'primary',
+    requiredHours: 100,
+    requiredTeachers: '中级烹调师及以上',
+    requiredCourses: ['烹饪原料知识', '刀工基础', '火候知识', '调味基础', '热菜制作基础'],
+  },
+  {
+    id: 'STD017',
+    occupation: 'chef',
+    occupationName: '中式烹调师',
+    level: 'intermediate',
+    requiredHours: 160,
+    requiredTeachers: '高级烹调师',
+    requiredCourses: ['烹饪工艺', '食品雕刻', '冷菜制作', '热菜创新', '宴席设计基础'],
+  },
+];
+
+const generateOccupationTrend = () => {
+  const data = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    data.push({
+      date: date.toISOString().split('T')[0],
+      rate: 82 + Math.random() * 15,
+    });
+  }
+  return data;
+};
+
+export const occupationData: OccupationData[] = [
+  {
+    code: 'electrician',
+    name: '电工',
+    totalTrainees: 156800,
+    passRate: 85.2,
+    employmentRate: 78.5,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 125440,
+  },
+  {
+    code: 'welder',
+    name: '焊工',
+    totalTrainees: 132500,
+    passRate: 82.8,
+    employmentRate: 82.1,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 109710,
+  },
+  {
+    code: 'housekeeping',
+    name: '家政服务',
+    totalTrainees: 178600,
+    passRate: 88.5,
+    employmentRate: 85.3,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 158061,
+  },
+  {
+    code: 'nursery',
+    name: '育婴师',
+    totalTrainees: 145200,
+    passRate: 86.7,
+    employmentRate: 88.2,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 125888,
+  },
+  {
+    code: 'it',
+    name: 'IT技术',
+    totalTrainees: 203500,
+    passRate: 79.3,
+    employmentRate: 86.7,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 161375,
+  },
+  {
+    code: 'auto_repair',
+    name: '汽车维修',
+    totalTrainees: 98700,
+    passRate: 81.5,
+    employmentRate: 79.4,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 80440,
+  },
+  {
+    code: 'chef',
+    name: '中式烹调师',
+    totalTrainees: 112600,
+    passRate: 84.2,
+    employmentRate: 83.8,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 94809,
+  },
+  {
+    code: 'other',
+    name: '其他',
+    totalTrainees: 82600,
+    passRate: 83.1,
+    employmentRate: 77.6,
+    attendanceTrend: generateOccupationTrend(),
+    certificateCount: 68640,
+  },
+];
+
+export const regionHierarchy: Record<string, { parent: string; name: string; children: string[] }> = {
+  '000000': { parent: '', name: '全国', children: ['440000', '320000', '330000', '310000', '110000', '370000', '420000', '430000', '510000', '500000', '530000', '610000', '350000', '340000', '230000', '220000', '210000', '360000', '410000', '450000', '460000', '520000', '540000', '620000', '630000', '640000', '650000', '120000', '130000', '140000', '150000'] },
+  '440000': { parent: '000000', name: '广东省', children: ['440100', '440300', '440400', '440600', '440700', '441300', '441900', '442000'] },
+  '440100': { parent: '440000', name: '广州市', children: [] },
+  '440300': { parent: '440000', name: '深圳市', children: [] },
+  '440400': { parent: '440000', name: '珠海市', children: [] },
+  '440600': { parent: '440000', name: '佛山市', children: [] },
+  '440700': { parent: '440000', name: '江门市', children: [] },
+  '441300': { parent: '440000', name: '惠州市', children: [] },
+  '441900': { parent: '440000', name: '东莞市', children: [] },
+  '442000': { parent: '440000', name: '中山市', children: [] },
+  '320000': { parent: '000000', name: '江苏省', children: ['320100', '320200', '320300', '320400', '320500', '320600'] },
+  '320100': { parent: '320000', name: '南京市', children: [] },
+  '320200': { parent: '320000', name: '无锡市', children: [] },
+  '320300': { parent: '320000', name: '徐州市', children: [] },
+  '320400': { parent: '320000', name: '常州市', children: [] },
+  '320500': { parent: '320000', name: '苏州市', children: [] },
+  '320600': { parent: '320000', name: '南通市', children: [] },
+  '330000': { parent: '000000', name: '浙江省', children: ['330100', '330200', '330300', '330400', '330500', '330600'] },
+  '330100': { parent: '330000', name: '杭州市', children: [] },
+  '330200': { parent: '330000', name: '宁波市', children: [] },
+  '330300': { parent: '330000', name: '温州市', children: [] },
+  '330400': { parent: '330000', name: '嘉兴市', children: [] },
+  '330500': { parent: '330000', name: '湖州市', children: [] },
+  '330600': { parent: '330000', name: '绍兴市', children: [] },
+  '310000': { parent: '000000', name: '上海市', children: ['310100'] },
+  '310100': { parent: '310000', name: '上海市辖区', children: [] },
+  '110000': { parent: '000000', name: '北京市', children: ['110100'] },
+  '110100': { parent: '110000', name: '北京市辖区', children: [] },
+  '370000': { parent: '000000', name: '山东省', children: ['370100', '370200'] },
+  '370100': { parent: '370000', name: '济南市', children: [] },
+  '370200': { parent: '370000', name: '青岛市', children: [] },
+  '420000': { parent: '000000', name: '湖北省', children: ['420100'] },
+  '420100': { parent: '420000', name: '武汉市', children: [] },
+  '430000': { parent: '000000', name: '湖南省', children: ['430100'] },
+  '430100': { parent: '430000', name: '长沙市', children: [] },
+  '510000': { parent: '000000', name: '四川省', children: ['510100'] },
+  '510100': { parent: '510000', name: '成都市', children: [] },
+  '500000': { parent: '000000', name: '重庆市', children: ['500100'] },
+  '500100': { parent: '500000', name: '重庆市辖区', children: [] },
+  '530000': { parent: '000000', name: '云南省', children: ['530100'] },
+  '530100': { parent: '530000', name: '昆明市', children: [] },
+  '610000': { parent: '000000', name: '陕西省', children: ['610100'] },
+  '610100': { parent: '610000', name: '西安市', children: [] },
+  '350000': { parent: '000000', name: '福建省', children: ['350100', '350200'] },
+  '350100': { parent: '350000', name: '福州市', children: [] },
+  '350200': { parent: '350000', name: '厦门市', children: [] },
+  '340000': { parent: '000000', name: '安徽省', children: ['340100'] },
+  '340100': { parent: '340000', name: '合肥市', children: [] },
+  '230000': { parent: '000000', name: '黑龙江省', children: ['230100'] },
+  '230100': { parent: '230000', name: '哈尔滨市', children: [] },
+  '220000': { parent: '000000', name: '吉林省', children: ['220100'] },
+  '220100': { parent: '220000', name: '长春市', children: [] },
+  '210000': { parent: '000000', name: '辽宁省', children: ['210100', '210200'] },
+  '210100': { parent: '210000', name: '沈阳市', children: [] },
+  '210200': { parent: '210000', name: '大连市', children: [] },
+  '360000': { parent: '000000', name: '江西省', children: ['360100'] },
+  '360100': { parent: '360000', name: '南昌市', children: [] },
+  '410000': { parent: '000000', name: '河南省', children: ['410100'] },
+  '410100': { parent: '410000', name: '郑州市', children: [] },
+  '450000': { parent: '000000', name: '广西壮族自治区', children: ['450100'] },
+  '450100': { parent: '450000', name: '南宁市', children: [] },
+  '460000': { parent: '000000', name: '海南省', children: ['460100'] },
+  '460100': { parent: '460000', name: '海口市', children: [] },
+  '520000': { parent: '000000', name: '贵州省', children: ['520100'] },
+  '520100': { parent: '520000', name: '贵阳市', children: [] },
+  '540000': { parent: '000000', name: '西藏自治区', children: ['540100'] },
+  '540100': { parent: '540000', name: '拉萨市', children: [] },
+  '620000': { parent: '000000', name: '甘肃省', children: ['620100'] },
+  '620100': { parent: '620000', name: '兰州市', children: [] },
+  '630000': { parent: '000000', name: '青海省', children: ['630100'] },
+  '630100': { parent: '630000', name: '西宁市', children: [] },
+  '640000': { parent: '000000', name: '宁夏回族自治区', children: ['640100'] },
+  '640100': { parent: '640000', name: '银川市', children: [] },
+  '650000': { parent: '000000', name: '新疆维吾尔自治区', children: ['650100'] },
+  '650100': { parent: '650000', name: '乌鲁木齐市', children: [] },
+  '120000': { parent: '000000', name: '天津市', children: ['120100'] },
+  '120100': { parent: '120000', name: '天津市辖区', children: [] },
+  '130000': { parent: '000000', name: '河北省', children: ['130100'] },
+  '130100': { parent: '130000', name: '石家庄市', children: [] },
+  '140000': { parent: '000000', name: '山西省', children: ['140100'] },
+  '140100': { parent: '140000', name: '太原市', children: [] },
+  '150000': { parent: '000000', name: '内蒙古自治区', children: ['150100'] },
+  '150100': { parent: '150000', name: '呼和浩特市', children: [] },
+};
+
+export const regionNameMap: Record<string, string> = Object.fromEntries(
+  Object.entries(regionHierarchy).map(([code, info]) => [code, info.name])
+);
