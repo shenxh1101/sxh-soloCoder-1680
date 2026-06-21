@@ -11,6 +11,7 @@ import {
   Modal,
   Popconfirm,
   message,
+  Alert,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -49,23 +50,8 @@ const buildRegionOptions = (regionCode: string, depth: number = 0): any[] => {
   }));
 };
 
-const getRegionOptions = () => {
-  const { user, getAccessibleRegions } = useAuthStore.getState();
-  if (!user || user.role === 'national') {
-    return buildRegionOptions('000000');
-  }
-  const accessible = getAccessibleRegions();
-  return accessible
-    .filter((code) => regionHierarchy[code]?.children?.length)
-    .map((code) => ({
-      value: code,
-      label: regionNameMap[code] || code,
-      children: buildRegionOptions(code, 1),
-    }));
-};
-
 export default function Institutions() {
-  const { filterInstitutions, user, getAccessibleRegions } = useAuthStore();
+  const { filterInstitutions, user, getViewScope, getAccessibleRegions } = useAuthStore();
   const [dataSource, setDataSource] = useState<Institution[]>([]);
   const [regionValue, setRegionValue] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
@@ -74,12 +60,65 @@ export default function Institutions() {
   const [detailVisible, setDetailVisible] = useState(false);
   const [currentInstitution, setCurrentInstitution] = useState<Institution | null>(null);
 
+  const viewScope = useMemo(() => getViewScope(), [getViewScope]);
+
   useEffect(() => {
     const filtered = filterInstitutions(mockInstitutions);
     setDataSource(filtered);
   }, [filterInstitutions]);
 
-  const regionOptions = useMemo(() => getRegionOptions(), []);
+  const regionOptions = useMemo(() => {
+    if (!user || user.role === 'national') {
+      return buildRegionOptions('000000');
+    }
+
+    if (user.role === 'province') {
+      return [
+        {
+          value: user.regionCode,
+          label: regionNameMap[user.regionCode] || user.regionCode,
+          children: buildRegionOptions(user.regionCode, 1),
+        },
+      ];
+    }
+
+    if (user.role === 'city') {
+      const region = regionHierarchy[user.regionCode];
+      if (region?.parent) {
+        return [
+          {
+            value: region.parent,
+            label: regionNameMap[region.parent] || region.parent,
+            children: [
+              {
+                value: user.regionCode,
+                label: regionNameMap[user.regionCode] || user.regionCode,
+              },
+            ],
+          },
+        ];
+      }
+      return [
+        {
+          value: user.regionCode,
+          label: regionNameMap[user.regionCode] || user.regionCode,
+        },
+      ];
+    }
+
+    if (user.role === 'institution') {
+      return [
+        {
+          value: user.regionCode,
+          label: regionNameMap[user.regionCode] || user.regionCode,
+        },
+      ];
+    }
+
+    return buildRegionOptions('000000');
+  }, [user]);
+
+  const showRegionFilter = user?.role !== 'institution';
 
   const filteredData = useMemo(() => {
     return dataSource.filter((item) => {
@@ -270,11 +309,6 @@ export default function Institutions() {
           <div>
             <h1 className="text-xl font-bold text-slate-800 font-serif">机构管理</h1>
             <p className="text-sm text-slate-500 mt-0.5">管理培训机构资质，维护培训组织信息</p>
-            {user && user.role !== 'national' && (
-              <p className="text-blue-600 text-xs mt-1">
-                当前数据范围：{regionNameMap[user.regionCode] || '全国'}
-              </p>
-            )}
           </div>
           <Space>
             <Button
@@ -287,17 +321,30 @@ export default function Institutions() {
           </Space>
         </div>
 
+        {viewScope.level !== 'country' && (
+          <Alert
+            message={`当前数据范围：${viewScope.name}（${['机构负责人', '市级管理员', '省级管理员'][
+              ['institution', 'city', 'province'].indexOf(viewScope.level)
+            ] || viewScope.level}）`}
+            type="info"
+            showIcon
+            className="mb-4"
+          />
+        )}
+
         <Card className="bg-white border border-slate-200 shadow-sm mb-4" styles={{ body: { padding: '16px' } }}>
           <div className="flex flex-wrap items-center gap-4">
-            <Cascader
-              options={regionOptions}
-              value={regionValue}
-              onChange={(value) => setRegionValue((value as string[]) || [])}
-              placeholder="选择地区"
-              style={{ width: 200 }}
-              allowClear
-              showSearch
-            />
+            {showRegionFilter && (
+              <Cascader
+                options={regionOptions}
+                value={regionValue}
+                onChange={(value) => setRegionValue((value as string[]) || [])}
+                placeholder="选择地区"
+                style={{ width: 200 }}
+                allowClear
+                showSearch
+              />
+            )}
             <Select
               placeholder="资质状态"
               allowClear

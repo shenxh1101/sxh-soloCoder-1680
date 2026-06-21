@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { User, RegionData, Warning, WeeklyReport, Institution } from '../types';
-import { mockUsers, regionHierarchy } from '../mock/data';
+import type { User, RegionData, Warning, WeeklyReport, Institution, OccupationData } from '../types';
+import { mockUsers, regionHierarchy, regionNameMap, mockCityData, institutions, nationalStandards } from '../mock/data';
 
 interface AuthState {
   user: User | null;
@@ -14,6 +14,12 @@ interface AuthState {
   filterWarnings: (warnings: Warning[]) => Warning[];
   filterReports: (reports: WeeklyReport[]) => WeeklyReport[];
   filterInstitutions: (institutions: Institution[]) => Institution[];
+  getViewScope: () => { level: 'country' | 'province' | 'city' | 'institution'; code: string; name: string };
+  getAccessibleCityData: () => RegionData[];
+  filterOccupationData: (data: OccupationData[]) => OccupationData[];
+  getCurrentMetrics: (nationalMetrics: RegionData | null, provinceData: RegionData[]) => RegionData | null;
+  canAccessRegion: (regionCode: string) => boolean;
+  canAccessReport: (reportRegionCode: string) => boolean;
 }
 
 const STORAGE_KEY = 'auth_user';
@@ -110,5 +116,142 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   filterInstitutions: (institutions: Institution[]) => {
     return get().getRegionFilter<Institution>(institutions);
+  },
+
+  canAccessRegion: (regionCode: string): boolean => {
+    const { user } = get();
+    if (!user) return false;
+    if (user.role === 'national') return true;
+
+    const accessibleRegions = get().getAccessibleRegions();
+    return accessibleRegions.includes(regionCode);
+  },
+
+  canAccessReport: (reportRegionCode: string): boolean => {
+    const { user } = get();
+    if (!user) return false;
+    if (user.role === 'national') return true;
+
+    if (user.role === 'institution' && user.institutionId) {
+      return false;
+    }
+
+    return get().canAccessRegion(reportRegionCode);
+  },
+
+  getViewScope: () => {
+    const { user } = get();
+    if (!user) {
+      return { level: 'country', code: '000000', name: '全国' };
+    }
+
+    if (user.role === 'national') {
+      return { level: 'country', code: '000000', name: '全国' };
+    }
+
+    if (user.role === 'province') {
+      return {
+        level: 'province',
+        code: user.regionCode,
+        name: regionNameMap[user.regionCode] || user.regionCode,
+      };
+    }
+
+    if (user.role === 'city') {
+      return {
+        level: 'city',
+        code: user.regionCode,
+        name: regionNameMap[user.regionCode] || user.regionCode,
+      };
+    }
+
+    if (user.role === 'institution' || user.role === 'academic') {
+      return {
+        level: 'institution',
+        code: user.institutionId || user.regionCode,
+        name: user.institutionName || regionNameMap[user.regionCode] || user.regionCode,
+      };
+    }
+
+    return { level: 'country', code: '000000', name: '全国' };
+  },
+
+  getAccessibleCityData: () => {
+    const { user } = get();
+    if (!user || user.role === 'national') {
+      return [];
+    }
+
+    if (user.role === 'province') {
+      return mockCityData[user.regionCode] || [];
+    }
+
+    if (user.role === 'city') {
+      const region = regionHierarchy[user.regionCode];
+      if (region?.parent) {
+        const provinceCities = mockCityData[region.parent] || [];
+        return provinceCities.filter((c) => c.regionCode === user.regionCode);
+      }
+    }
+
+    return [];
+  },
+
+  filterOccupationData: (data: OccupationData[]) => {
+    const { user } = get();
+    if (!user || user.role === 'national') return data;
+
+    const accessibleInstitutions = get().filterInstitutions(institutions);
+
+    return data.map((occ) => {
+      const scaleFactor = Math.max(
+        0.05,
+        Math.min(1, accessibleInstitutions.length / 55)
+      );
+
+      return {
+        ...occ,
+        totalTrainees: Math.round(occ.totalTrainees * scaleFactor),
+        passRate: Math.min(100, Math.max(50, occ.passRate + (Math.random() - 0.5) * 5)),
+        employmentRate: Math.min(100, Math.max(40, occ.employmentRate + (Math.random() - 0.5) * 5)),
+        certificateCount: Math.round(occ.certificateCount * scaleFactor),
+      };
+    });
+  },
+
+  getCurrentMetrics: (nationalMetrics: RegionData | null, provinceData: RegionData[]) => {
+    const { user } = get();
+    if (!user || user.role === 'national') {
+      return nationalMetrics;
+    }
+
+    if (user.role === 'province') {
+      const province = provinceData.find((p) => p.regionCode === user.regionCode);
+      return province || null;
+    }
+
+    if (user.role === 'city') {
+      const region = regionHierarchy[user.regionCode];
+      if (region?.parent) {
+        const provinceCities = mockCityData[region.parent] || [];
+        const city = provinceCities.find((c) => c.regionCode === user.regionCode);
+        if (city) return city;
+      }
+    }
+
+    if (user.role === 'institution' && user.institutionId) {
+      const inst = institutions.find((i) => i.id === user.institutionId);
+      if (inst) {
+        return {
+          regionCode: inst.id,
+          regionName: inst.name,
+          regionLevel: 'institution',
+          metrics: inst.metrics,
+          trend: [],
+        } as RegionData;
+      }
+    }
+
+    return nationalMetrics;
   },
 }));

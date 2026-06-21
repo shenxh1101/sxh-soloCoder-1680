@@ -51,23 +51,24 @@ const reportStatusConfig: Record<string, { color: string; text: string }> = {
 export default function ReportDetail() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
-  const { currentReport, fetchReportDetail, loading, reports } = useReportStore();
-  const { filterReports, user } = useAuthStore();
+  const { currentReport, fetchReportDetail, loading, fetchReports, reports } = useReportStore();
+  const { canAccessReport, user } = useAuthStore();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (reportId) {
-      fetchReportDetail(reportId);
+      fetchReports().then(() => {
+        fetchReportDetail(reportId);
+      });
     }
-  }, [reportId, fetchReportDetail]);
+  }, [reportId, fetchReportDetail, fetchReports]);
 
   useEffect(() => {
-    if (reports.length > 0 && currentReport) {
-      const accessibleReports = filterReports(reports);
-      const canAccess = accessibleReports.some((r) => r.id === currentReport.id);
+    if (currentReport) {
+      const canAccess = canAccessReport(currentReport.regionCode);
       setHasPermission(canAccess);
     }
-  }, [reports, currentReport, filterReports]);
+  }, [currentReport, canAccessReport]);
 
   const handleDownload = () => {
     message.success('PDF 下载已开始');

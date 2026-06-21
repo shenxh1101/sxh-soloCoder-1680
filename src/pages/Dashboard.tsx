@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Segmented, Card, Tag, List } from 'antd';
+import { Segmented, Card, Tag, List, Alert } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import MetricsCard from '@/components/MetricsCard';
@@ -7,7 +7,9 @@ import RankingList from '@/components/RankingList';
 import { useDashboardStore } from '@/store/dashboard';
 import { useAuthStore } from '@/store/auth';
 import { registerChinaMap } from '@/lib/chinaMap';
-import type { RankingItem, OccupationData } from '@/types';
+import { regionNameMap } from '@/mock/data';
+import type { RankingItem, OccupationData, RegionData } from '@/types';
+import { cn } from '@/lib/utils';
 
 const provinceNameMap: Record<string, string> = {
   '北京市': '北京', '天津市': '天津', '上海市': '上海', '重庆市': '重庆',
@@ -21,17 +23,6 @@ const provinceNameMap: Record<string, string> = {
   '新疆维吾尔自治区': '新疆', '香港特别行政区': '香港', '澳门特别行政区': '澳门',
 };
 
-const certificateTypes = [
-  { name: '电工', value: 1850, color: '#3b82f6' },
-  { name: '焊工', value: 1620, color: '#8b5cf6' },
-  { name: '家政', value: 2100, color: '#10b981' },
-  { name: '育婴', value: 1450, color: '#f59e0b' },
-  { name: 'IT', value: 2380, color: '#ef4444' },
-  { name: '汽修', value: 1280, color: '#06b6d4' },
-  { name: '厨师', value: 1560, color: '#ec4899' },
-  { name: '其他', value: 960, color: '#64748b' },
-];
-
 const occupationColors: Record<string, string> = {
   '电工': '#3b82f6',
   '焊工': '#8b5cf6',
@@ -43,10 +34,22 @@ const occupationColors: Record<string, string> = {
   '其他': '#64748b',
 };
 
+const roleNameMap: Record<string, string> = {
+  national: '国家级管理员',
+  province: '省级管理员',
+  city: '市级管理员',
+  institution: '机构负责人',
+  academic: '专家委员会',
+};
+
 export default function Dashboard() {
   const [mapReady, setMapReady] = useState(false);
   const user = useAuthStore((state) => state.user);
   const filterProvinces = useAuthStore((state) => state.filterProvinces);
+  const getViewScope = useAuthStore((state) => state.getViewScope);
+  const getAccessibleCityData = useAuthStore((state) => state.getAccessibleCityData);
+  const filterOccupationData = useAuthStore((state) => state.filterOccupationData);
+  const getCurrentMetrics = useAuthStore((state) => state.getCurrentMetrics);
 
   const {
     viewMode,
@@ -65,9 +68,24 @@ export default function Dashboard() {
     selectOccupation,
   } = useDashboardStore();
 
-  const filteredProvinceData = useMemo(() => {
-    return filterProvinces(provinceData);
-  }, [provinceData, filterProvinces]);
+  const viewScope = useMemo(() => getViewScope(), [getViewScope]);
+  const filteredProvinceData = useMemo(() => filterProvinces(provinceData), [provinceData, filterProvinces]);
+  const accessibleCityData = useMemo(() => getAccessibleCityData(), [getAccessibleCityData]);
+  const filteredOccupationData = useMemo(() => filterOccupationData(occupationData), [occupationData, filterOccupationData]);
+  const currentMetrics = useMemo(() => getCurrentMetrics(nationalMetrics, provinceData), [nationalMetrics, provinceData, getCurrentMetrics]);
+
+  const displayCityData = useMemo(() => {
+    if (viewScope.level === 'province') {
+      return accessibleCityData;
+    }
+    if (viewScope.level === 'city') {
+      return accessibleCityData;
+    }
+    if (selectedProvince) {
+      return cityData;
+    }
+    return [];
+  }, [viewScope.level, accessibleCityData, selectedProvince, cityData]);
 
   useEffect(() => {
     registerChinaMap().then(() => setMapReady(true));
@@ -89,11 +107,21 @@ export default function Dashboard() {
 
   const rankingData: RankingItem[] = useMemo(() => {
     if (viewMode === 'occupation') {
-      return [...occupationData]
+      return [...filteredOccupationData]
         .sort((a, b) => b.passRate - a.passRate)
         .map((o, idx) => ({
           name: o.name,
           value: o.passRate,
+          change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
+        }));
+    }
+
+    if (viewScope.level === 'province' || (viewScope.level === 'city' && displayCityData.length > 0)) {
+      return [...displayCityData]
+        .sort((a, b) => b.metrics.passRate - a.metrics.passRate)
+        .map((c, idx) => ({
+          name: c.regionName,
+          value: c.metrics.passRate,
           change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
         }));
     }
@@ -105,23 +133,37 @@ export default function Dashboard() {
         value: p.metrics.passRate,
         change: idx < 3 ? 2.1 - idx * 0.5 : (idx % 2 === 0 ? 0.8 : -0.6),
       }));
-  }, [viewMode, filteredProvinceData, occupationData]);
+  }, [viewMode, filteredProvinceData, filteredOccupationData, viewScope.level, displayCityData]);
 
   const mapOption = useMemo(() => {
-    const data = filteredProvinceData.map((p) => ({
-      name: provinceNameMap[p.regionName] || p.regionName,
-      value: p.metrics.totalTrainees,
-      passRate: p.metrics.passRate,
-      regionCode: p.regionCode,
-      fullName: p.regionName,
-    }));
+    const showMap = viewScope.level === 'country' || viewScope.level === 'province';
+    const data = showMap && viewScope.level === 'country'
+      ? filteredProvinceData.map((p) => ({
+          name: provinceNameMap[p.regionName] || p.regionName,
+          value: p.metrics.totalTrainees,
+          passRate: p.metrics.passRate,
+          regionCode: p.regionCode,
+          fullName: p.regionName,
+        }))
+      : showMap && viewScope.level === 'province'
+      ? (() => {
+          const province = filteredProvinceData.find(p => p.regionCode === viewScope.code);
+          return province ? [{
+            name: provinceNameMap[province.regionName] || province.regionName,
+            value: province.metrics.totalTrainees,
+            passRate: province.metrics.passRate,
+            regionCode: province.regionCode,
+            fullName: province.regionName,
+          }] : [];
+        })()
+      : [];
 
     const maxValue = Math.max(...data.map((d) => d.value), 1);
     const minValue = Math.min(...data.map((d) => d.value), 0);
 
     return {
       title: {
-        text: '全国培训热力图',
+        text: viewScope.level === 'country' ? '全国培训热力图' : `${viewScope.name}培训概览`,
         left: 'center',
         top: 10,
         textStyle: {
@@ -158,12 +200,13 @@ export default function Dashboard() {
           color: ['#dbeafe', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8'],
         },
         calculable: true,
+        show: viewScope.level === 'country',
       },
       geo: {
         map: 'china',
         roam: true,
-        zoom: 1.2,
-        center: [104, 37],
+        zoom: viewScope.level === 'country' ? 1.2 : 2,
+        center: viewScope.level === 'country' ? [104, 37] : undefined,
         label: {
           show: false,
         },
@@ -204,11 +247,12 @@ export default function Dashboard() {
         },
       ],
     };
-  }, [filteredProvinceData]);
+  }, [filteredProvinceData, viewScope]);
 
   const onMapEvents = useMemo(
     () => ({
       click: (params: { name?: string; data?: { regionCode?: string; fullName?: string } }) => {
+        if (viewScope.level !== 'country' && viewScope.level !== 'province') return;
         if (params.data?.regionCode) {
           if (selectedProvince === params.data.regionCode) {
             clearSelection();
@@ -218,13 +262,13 @@ export default function Dashboard() {
         }
       },
     }),
-    [selectedProvince, selectProvince, clearSelection]
+    [selectedProvince, selectProvince, clearSelection, viewScope.level]
   );
 
   const attendanceOption = useMemo(() => {
     if (viewMode === 'occupation') {
-      const selectedOcc = occupationData.find((o) => o.code === selectedOccupation);
-      const trendData = selectedOcc?.attendanceTrend || occupationData[0]?.attendanceTrend || [];
+      const selectedOcc = filteredOccupationData.find((o) => o.code === selectedOccupation);
+      const trendData = selectedOcc?.attendanceTrend || filteredOccupationData[0]?.attendanceTrend || [];
       const dates = trendData.map((t) => t.date.slice(5).replace('-', '/'));
 
       const seriesData = selectedOccupation
@@ -233,7 +277,7 @@ export default function Dashboard() {
             data: trendData.map((t) => t.rate),
             color: occupationColors[selectedOcc?.name || ''] || '#3b82f6',
           }]
-        : occupationData.slice(0, 5).map((o) => ({
+        : filteredOccupationData.slice(0, 5).map((o) => ({
             name: o.name,
             data: o.attendanceTrend.map((t) => t.rate),
             color: occupationColors[o.name] || '#3b82f6',
@@ -302,13 +346,46 @@ export default function Dashboard() {
       };
     }
 
-    const nationalTrend = nationalMetrics?.trend || [];
-    const selectedProvinceData = filteredProvinceData.find((p) => p.regionCode === selectedProvince);
-    const provinceTrend = selectedProvinceData?.trend || [];
-    const selectedCity = cityData[0];
-    const cityTrend = selectedCity?.trend || [];
+    const currentTrend = currentMetrics?.trend || [];
+    const dates = currentTrend.map((t) => t.date.slice(5).replace('-', '/'));
 
-    const dates = nationalTrend.map((t) => t.date.slice(5).replace('-', '/'));
+    const series: any[] = [
+      {
+        name: viewScope.name,
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 8,
+        data: currentTrend.map((t: { attendanceRate: number }) => t.attendanceRate),
+        lineStyle: { width: 3, color: '#3b82f6' },
+        itemStyle: { color: '#3b82f6', borderWidth: 2, borderColor: '#fff' },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+            { offset: 1, color: 'rgba(59, 130, 246, 0.05)' },
+          ]),
+        },
+      },
+    ];
+
+    const legendData = [viewScope.name];
+
+    if (viewScope.level === 'city' && displayCityData.length > 0) {
+      const city = displayCityData[0];
+      if (city && city.trend?.length > 0) {
+        legendData.push(city.regionName);
+        series.push({
+          name: city.regionName,
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 8,
+          data: city.trend.map((t: any) => t.attendanceRate),
+          lineStyle: { width: 3, color: '#10b981' },
+          itemStyle: { color: '#10b981', borderWidth: 2, borderColor: '#fff' },
+        });
+      }
+    }
 
     return {
       title: {
@@ -329,11 +406,7 @@ export default function Dashboard() {
         valueFormatter: (val: number) => `${val.toFixed(1)}%`,
       },
       legend: {
-        data: [
-          '全国',
-          selectedProvinceData?.regionName || '选中省份',
-          selectedCity?.regionName || '选中地市',
-        ].filter(Boolean),
+        data: legendData,
         bottom: 10,
         textStyle: { color: '#6b7280' },
         icon: 'roundRect',
@@ -364,70 +437,13 @@ export default function Dashboard() {
         axisTick: { show: false },
         splitLine: { lineStyle: { color: 'rgba(229, 231, 235, 0.8)' } },
       },
-      series: [
-        {
-          name: '全国',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 8,
-          data: nationalTrend.map((t) => t.attendanceRate),
-          lineStyle: { width: 3, color: '#3b82f6' },
-          itemStyle: { color: '#3b82f6', borderWidth: 2, borderColor: '#fff' },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
-              { offset: 1, color: 'rgba(59, 130, 246, 0.05)' },
-            ]),
-          },
-        },
-        ...(provinceTrend.length > 0
-          ? [
-              {
-                name: selectedProvinceData?.regionName || '选中省份',
-                type: 'line',
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 8,
-                data: provinceTrend.map((t: { attendanceRate: number }) => t.attendanceRate),
-                lineStyle: { width: 3, color: '#10b981' },
-                itemStyle: { color: '#10b981', borderWidth: 2, borderColor: '#fff' },
-                areaStyle: {
-                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: 'rgba(16, 185, 129, 0.25)' },
-                    { offset: 1, color: 'rgba(16, 185, 129, 0.02)' },
-                  ]),
-                },
-              },
-            ]
-          : []),
-        ...(cityTrend.length > 0
-          ? [
-              {
-                name: selectedCity?.regionName || '选中地市',
-                type: 'line',
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 8,
-                data: cityTrend.map((t: { attendanceRate: number }) => t.attendanceRate),
-                lineStyle: { width: 3, color: '#f59e0b' },
-                itemStyle: { color: '#f59e0b', borderWidth: 2, borderColor: '#fff' },
-                areaStyle: {
-                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: 'rgba(245, 158, 11, 0.25)' },
-                    { offset: 1, color: 'rgba(245, 158, 11, 0.02)' },
-                  ]),
-                },
-              },
-            ]
-          : []),
-      ],
+      series,
     };
-  }, [viewMode, nationalMetrics, filteredProvinceData, selectedProvince, cityData, occupationData, selectedOccupation]);
+  }, [viewMode, currentMetrics, viewScope, displayCityData, filteredOccupationData, selectedOccupation]);
 
   const certificateOption = useMemo(() => {
     if (viewMode === 'occupation') {
-      const data = occupationData.map((o) => ({
+      const data = filteredOccupationData.map((o) => ({
         name: o.name,
         value: o.certificateCount,
         itemStyle: { color: occupationColors[o.name] || '#64748b' },
@@ -500,6 +516,15 @@ export default function Dashboard() {
       };
     }
 
+    const certData = [
+      { name: '电工证', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.25), color: '#3b82f6' },
+      { name: '焊工证', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.18), color: '#8b5cf6' },
+      { name: '家政服务证', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.22), color: '#10b981' },
+      { name: '育婴师证', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.15), color: '#f59e0b' },
+      { name: 'IT技能证', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.12), color: '#ef4444' },
+      { name: '其他', value: Math.round((currentMetrics?.metrics.totalTrainees || 0) * 0.08), color: '#64748b' },
+    ];
+
     return {
       title: {
         text: '证书类型分布',
@@ -561,7 +586,7 @@ export default function Dashboard() {
           labelLine: {
             show: false,
           },
-          data: certificateTypes.map((c) => ({
+          data: certData.map((c) => ({
             value: c.value,
             name: c.name,
             itemStyle: { color: c.color },
@@ -569,10 +594,12 @@ export default function Dashboard() {
         },
       ],
     };
-  }, [viewMode, occupationData]);
+  }, [viewMode, filteredOccupationData, currentMetrics]);
 
   const occupationTraineesOption = useMemo(() => {
-    const sortedData = [...occupationData].sort((a, b) => b.totalTrainees - a.totalTrainees);
+    const sortedData = [...filteredOccupationData].sort((a, b) => b.totalTrainees - a.totalTrainees);
+    const maxValue = Math.max(...sortedData.map(d => d.totalTrainees), 1);
+    
     return {
       title: {
         text: '各职业培训人数',
@@ -599,9 +626,10 @@ export default function Dashboard() {
       },
       xAxis: {
         type: 'value',
+        max: maxValue * 1.1,
         axisLabel: {
           color: '#6b7280',
-          formatter: (val: number) => (val / 10000).toFixed(1) + '万',
+          formatter: (val: number) => val >= 10000 ? (val / 10000).toFixed(1) + '万' : val.toString(),
         },
         axisLine: { show: false },
         axisTick: { show: false },
@@ -628,91 +656,202 @@ export default function Dashboard() {
             show: true,
             position: 'right',
             color: '#6b7280',
-            formatter: (params: { value: number }) => (params.value / 10000).toFixed(1) + '万',
+            formatter: (params: { value: number }) => 
+              params.value >= 10000 ? (params.value / 10000).toFixed(1) + '万' : params.value.toString(),
           },
           barWidth: 20,
         },
       ],
     };
-  }, [occupationData]);
+  }, [filteredOccupationData]);
 
-  const renderProvinceView = () => (
-    <>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
-          {mapReady ? (
+  const renderScopeInfo = () => {
+    if (viewScope.level === 'country') return null;
+    
+    return (
+      <Alert
+        message={`当前数据范围：${viewScope.name}（${roleNameMap[user?.role || '']}）`}
+        type="info"
+        showIcon
+        className="mb-4"
+      />
+    );
+  };
+
+  const renderProvinceView = () => {
+    const showMap = viewScope.level === 'country' || viewScope.level === 'province';
+    const showCityList = viewScope.level === 'province' || 
+                        (viewScope.level === 'country' && selectedProvince) ||
+                        viewScope.level === 'city';
+
+    if (viewScope.level === 'institution') {
+      return (
+        <>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <div className="xl:col-span-2 rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">机构概览</h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-500 mb-1">机构名称</div>
+                    <div className="text-lg font-semibold text-gray-900">{viewScope.name}</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-500 mb-1">机构等级</div>
+                    <Tag color="blue" className="mt-1">高级</Tag>
+                  </div>
+                </div>
+                <div className="border-t border-gray-100 pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">培训规模</h4>
+                  <div className="flex items-center gap-6">
+                    <div>
+                      <div className="text-2xl font-bold text-blue-600">
+                        {currentMetrics?.metrics.totalTrainees.toLocaleString() || 0}
+                      </div>
+                      <div className="text-xs text-gray-500">在培人数</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-emerald-600">
+                        {currentMetrics?.metrics.passRate.toFixed(1) || 0}%
+                      </div>
+                      <div className="text-xs text-gray-500">合格率</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-purple-600">
+                        {currentMetrics?.metrics.employmentRate.toFixed(1) || 0}%
+                      </div>
+                      <div className="text-xs text-gray-500">就业率</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <RankingList 
+                data={rankingData} 
+                title="职业类别排名" 
+                unit="%" 
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
+              <ReactECharts
+                option={attendanceOption}
+                style={{ height: 380, width: '100%' }}
+                notMerge={true}
+                lazyUpdate={true}
+              />
+            </div>
+
+            <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
+              <ReactECharts
+                option={certificateOption}
+                style={{ height: 380, width: '100%' }}
+                notMerge={true}
+                lazyUpdate={true}
+              />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <div className="xl:col-span-2 rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
+            {showMap && mapReady ? (
+              <ReactECharts
+                option={mapOption}
+                style={{ height: viewScope.level === 'city' ? 320 : 520, width: '100%' }}
+                onEvents={onMapEvents}
+                notMerge={true}
+                lazyUpdate={true}
+              />
+            ) : showMap ? (
+              <div className="flex items-center justify-center h-[520px]">
+                <div className="text-gray-500 text-sm">地图加载中...</div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[320px]">
+                <div className="text-gray-500 text-sm">机构级别暂无地图视图</div>
+              </div>
+            )}
+            {showCityList && displayCityData.length > 0 && (
+              <div className="border-t border-gray-100 px-6 py-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-gray-900">
+                    {viewScope.level === 'province' 
+                      ? `${viewScope.name} - 地市列表` 
+                      : viewScope.level === 'city'
+                      ? `${viewScope.name} - 详细数据`
+                      : `${filteredProvinceData.find((p) => p.regionCode === selectedProvince)?.regionName} - 地市列表`}
+                  </h4>
+                  {selectedProvince && (
+                    <button
+                      onClick={clearSelection}
+                      className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                    >
+                      清除选择
+                    </button>
+                  )}
+                </div>
+                <div className={cn(
+                  "grid gap-3",
+                  displayCityData.length > 3 ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"
+                )}>
+                  {displayCityData.map((city) => (
+                    <div
+                      key={city.regionCode}
+                      className="rounded-lg bg-gray-50 px-4 py-3 hover:bg-blue-50 transition-colors cursor-pointer"
+                    >
+                      <p className="text-sm font-medium text-gray-900">{city.regionName}</p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                        <span>培训 {city.metrics.totalTrainees.toLocaleString()}</span>
+                        <span className="text-emerald-600">
+                          合格 {city.metrics.passRate.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <RankingList 
+              data={rankingData} 
+              title={viewScope.level === 'province' || viewScope.level === 'city' ? '合格率排名榜' : '合格率排名榜'} 
+              unit="%" 
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
             <ReactECharts
-              option={mapOption}
-              style={{ height: 520, width: '100%' }}
-              onEvents={onMapEvents}
+              option={attendanceOption}
+              style={{ height: 380, width: '100%' }}
               notMerge={true}
               lazyUpdate={true}
             />
-          ) : (
-            <div className="flex items-center justify-center h-[520px]">
-              <div className="text-gray-500 text-sm">地图加载中...</div>
-            </div>
-          )}
-          {selectedProvince && cityData.length > 0 && (
-            <div className="border-t border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-gray-900">
-                  {filteredProvinceData.find((p) => p.regionCode === selectedProvince)?.regionName}
-                  - 地市列表
-                </h4>
-                <button
-                  onClick={clearSelection}
-                  className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
-                >
-                  清除选择
-                </button>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {cityData.map((city) => (
-                  <div
-                    key={city.regionCode}
-                    className="rounded-lg bg-gray-50 px-4 py-3 hover:bg-blue-50 transition-colors cursor-pointer"
-                  >
-                    <p className="text-sm font-medium text-gray-900">{city.regionName}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                      <span>培训 {city.metrics.totalTrainees.toLocaleString()}</span>
-                      <span className="text-emerald-600">
-                        合格 {city.metrics.passRate.toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
 
-        <div>
-          <RankingList data={rankingData} title="合格率排名榜" unit="%" />
+          <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
+            <ReactECharts
+              option={certificateOption}
+              style={{ height: 380, width: '100%' }}
+              notMerge={true}
+              lazyUpdate={true}
+            />
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
-          <ReactECharts
-            option={attendanceOption}
-            style={{ height: 380, width: '100%' }}
-            notMerge={true}
-            lazyUpdate={true}
-          />
-        </div>
-
-        <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
-          <ReactECharts
-            option={certificateOption}
-            style={{ height: 380, width: '100%' }}
-            notMerge={true}
-            lazyUpdate={true}
-          />
-        </div>
-      </div>
-    </>
-  );
+      </>
+    );
+  };
 
   const renderOccupationView = () => (
     <>
@@ -727,9 +866,20 @@ export default function Dashboard() {
         </div>
 
         <div>
-          <Card title="职业类别总览" className="shadow-sm h-full" styles={{ body: { padding: 0 } }}>
+          <Card 
+            title={
+              <span>
+                职业类别总览
+                <span className="text-xs text-gray-500 ml-2 font-normal">
+                  （{viewScope.name}）
+                </span>
+              </span>
+            } 
+            className="shadow-sm h-full" 
+            styles={{ body: { padding: 0 } }}
+          >
             <List
-              dataSource={[...occupationData].sort((a, b) => b.totalTrainees - a.totalTrainees)}
+              dataSource={[...filteredOccupationData].sort((a, b) => b.totalTrainees - a.totalTrainees)}
               renderItem={(item: OccupationData) => (
                 <List.Item
                   className={`px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors ${
@@ -746,7 +896,11 @@ export default function Dashboard() {
                       <span className="font-medium text-gray-900">{item.name}</span>
                     </div>
                     <div className="flex items-center gap-4 text-sm">
-                      <Tag color="blue">{(item.totalTrainees / 10000).toFixed(1)}万人</Tag>
+                      <Tag color="blue">
+                        {item.totalTrainees >= 10000 
+                          ? (item.totalTrainees / 10000).toFixed(1) + '万人' 
+                          : item.totalTrainees + '人'}
+                      </Tag>
                       <Tag color="green">{item.passRate.toFixed(1)}%</Tag>
                     </div>
                   </div>
@@ -792,20 +946,12 @@ export default function Dashboard() {
                 <span className="mr-4">
                   当前身份：
                   <Tag color="blue" className="ml-1">
-                    {user.role === 'national'
-                      ? '国家级管理员'
-                      : user.role === 'province'
-                      ? '省级管理员'
-                      : user.role === 'city'
-                      ? '市级管理员'
-                      : user.role === 'institution'
-                      ? '机构负责人'
-                      : '专家委员会'}
+                    {roleNameMap[user.role] || user.role}
                   </Tag>
                 </span>
               )}
-              {nationalMetrics?.metrics.updatedAt
-                ? `数据更新时间：${new Date(nationalMetrics.metrics.updatedAt).toLocaleString('zh-CN')}`
+              {currentMetrics?.metrics.updatedAt
+                ? `数据更新时间：${new Date(currentMetrics.metrics.updatedAt).toLocaleString('zh-CN')}`
                 : '加载中...'}
             </p>
           </div>
@@ -820,10 +966,12 @@ export default function Dashboard() {
           />
         </div>
 
+        {renderScopeInfo()}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricsCard
             title="培训合格率"
-            value={nationalMetrics?.metrics.passRate || 0}
+            value={currentMetrics?.metrics.passRate || 0}
             suffix="%"
             trend={1.3}
             trendLabel="较上周"
@@ -832,7 +980,7 @@ export default function Dashboard() {
           />
           <MetricsCard
             title="就业转化率"
-            value={nationalMetrics?.metrics.employmentRate || 0}
+            value={currentMetrics?.metrics.employmentRate || 0}
             suffix="%"
             trend={0.8}
             trendLabel="较上周"
@@ -841,7 +989,7 @@ export default function Dashboard() {
           />
           <MetricsCard
             title="技能提升指数"
-            value={nationalMetrics?.metrics.skillImprovementIndex || 0}
+            value={currentMetrics?.metrics.skillImprovementIndex || 0}
             trend={2.1}
             trendLabel="较上月"
             color="purple"
@@ -849,7 +997,7 @@ export default function Dashboard() {
           />
           <MetricsCard
             title="证书发放及时率"
-            value={nationalMetrics?.metrics.certificateTimeliness || 0}
+            value={currentMetrics?.metrics.certificateTimeliness || 0}
             suffix="%"
             trend={-0.3}
             trendLabel="较上周"

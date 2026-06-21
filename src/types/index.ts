@@ -10,7 +10,7 @@ export interface TrainingMetrics {
 export interface RegionData {
   regionCode: string;
   regionName: string;
-  regionLevel: 'country' | 'province' | 'city';
+  regionLevel: 'country' | 'province' | 'city' | 'institution';
   metrics: TrainingMetrics;
   trend: {
     date: string;
@@ -160,6 +160,7 @@ export interface User {
   role: 'national' | 'province' | 'city' | 'institution' | 'academic';
   regionCode: string;
   institutionId?: string;
+  institutionName?: string;
   name: string;
 }
 

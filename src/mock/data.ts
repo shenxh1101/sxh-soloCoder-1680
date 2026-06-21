@@ -28,6 +28,7 @@ export const mockUsers: User[] = [
     role: 'institution',
     regionCode: '440100',
     institutionId: 'INS001',
+    institutionName: '广州市职业技能培训中心',
     name: '机构负责人',
   },
   {
@@ -36,6 +37,7 @@ export const mockUsers: User[] = [
     role: 'academic',
     regionCode: '440100',
     institutionId: 'INS001',
+    institutionName: '广州市职业技能培训中心',
     name: '教务管理员',
   },
 ];
